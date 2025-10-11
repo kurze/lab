@@ -1,0 +1,79 @@
+package handlers
+
+import (
+	_ "embed"
+	"net/http"
+	"strings"
+
+	"github.com/kurze/lab/internal/chat"
+)
+
+//go:embed index.html
+var indexTemplate string
+
+// IndexHandler serves the main HTML page with last 10 messages
+func IndexHandler(state *chat.ChatState) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Allocate a unique nickname for this visitor
+		nickname := state.AllocateNickname()
+
+		// Get last 10 messages
+		messages := state.GetLastN(10)
+
+		// Render messages as HTML
+		var messagesHTML strings.Builder
+		for _, msg := range messages {
+			messagesHTML.WriteString(`<div class="msg" data-id="`)
+			messagesHTML.WriteString(formatInt64(msg.ID))
+			messagesHTML.WriteString(`">
+      <span class="nick">`)
+			messagesHTML.WriteString(msg.Nickname)
+			messagesHTML.WriteString(`</span>
+      <span class="text">`)
+			messagesHTML.WriteString(msg.Text)
+			messagesHTML.WriteString(`</span>
+      <time>`)
+			messagesHTML.WriteString(msg.Timestamp.Format("15:04:05.000"))
+			messagesHTML.WriteString(`</time>
+    </div>
+`)
+		}
+
+		// Replace placeholders in template
+		html := indexTemplate
+		html = strings.Replace(html, "{{MESSAGES}}", messagesHTML.String(), 1)
+		html = strings.ReplaceAll(html, "{{NICKNAME}}", nickname)
+
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(html))
+	}
+}
+
+// Helper to format int64 to string
+func formatInt64(n int64) string {
+	if n == 0 {
+		return "0"
+	}
+
+	negative := n < 0
+	if negative {
+		n = -n
+	}
+
+	var buf [20]byte
+	i := len(buf) - 1
+
+	for n > 0 {
+		buf[i] = byte('0' + n%10)
+		n /= 10
+		i--
+	}
+
+	if negative {
+		buf[i] = '-'
+		i--
+	}
+
+	return string(buf[i+1:])
+}
