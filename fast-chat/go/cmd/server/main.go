@@ -19,9 +19,9 @@ import (
 const (
 	h2Addr   = ":8443"  // HTTP/2 on TCP
 	h3Addr   = ":8443"  // HTTP/3 on UDP (same port, different protocol)
-	certFile = "certs/cert.pem"
-	keyFile  = "certs/key.pem"
-	logFile  = "logs/messages.jsonl" // Message log file
+	certFile = "../certs/cert.pem"
+	keyFile  = "../certs/key.pem"
+	logFile  = "../logs/messages.jsonl" // Message log file
 )
 
 // altSvcMiddleware adds Alt-Svc header to advertise HTTP/3 availability
@@ -35,7 +35,7 @@ func altSvcMiddleware(next http.Handler) http.Handler {
 
 func main() {
 	// Ensure logs directory exists
-	if err := os.MkdirAll("logs", 0755); err != nil {
+	if err := os.MkdirAll("../logs", 0755); err != nil {
 		log.Fatalf("Failed to create logs directory: %v", err)
 	}
 

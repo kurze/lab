@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Fastest Chat</title>
+  <style>
+    body { margin: 0; font: 14px sans-serif; }
+    #messages { height: calc(100vh - 60px); overflow-y: auto; padding: 10px; }
+    .msg { margin: 4px 0; }
+    .nick { font-weight: bold; margin-right: 8px; }
+    .text { color: #333; }
+    time { color: #999; font-size: 11px; margin-left: 8px; }
+    .sys { color: #666; font-style: italic; }
+    .latency { color: #0a0; font-size: 10px; }
+    #input-area { position: fixed; bottom: 0; width: 100%; padding: 10px; background: #f5f5f5; box-sizing: border-box; }
+    #msg-input { width: calc(100% - 100px); padding: 8px; }
+    #send-btn { width: 80px; padding: 8px; }
+    #status { font-size: 11px; color: #666; }
+  </style>
+</head>
+<body>
+  <div id="messages">
+    {{MESSAGES}}
+  </div>
+
+  <div id="input-area">
+    <div id="status">
+      <span id="nickname" style="color: #0066cc; font-weight: bold;">{{NICKNAME}}</span> •
+      <span id="user-count">1 user online</span> •
+      <span id="connection-status">Connecting...</span>
+    </div>
+    <input type="text" id="msg-input" placeholder="Type a message..." autofocus>
+    <button id="send-btn">Send</button>
+  </div>
+
+  <script>
+    // Sticky nickname: try to reuse from sessionStorage, fallback to server-assigned
+    let nickname = sessionStorage.getItem('chatNickname') || "{{NICKNAME}}";
+    sessionStorage.setItem('chatNickname', nickname);
+
+    // Update UI with sticky nickname
+    document.getElementById('nickname').textContent = nickname;
+
+    let conn = null;
+    let reconnectDelay = 1000;
+    const pendingMessages = new Map();
+    let historyLoaded = 0; // Track how many history messages we've loaded
+    let historyLoading = false;
+
+    async function connect() {
+      try {
+        if ('WebTransport' in window) {
+          conn = new WebTransport(`https://${location.host}/chat`);
+          await conn.ready;
+          handleWebTransport(conn);
+          setStatus('Connected (WebTransport)');
+          reconnectDelay = 1000;
+          return;
+        }
+      } catch (e) {
+        console.log('WebTransport failed, trying WebSocket');
+      }
+
+      try {
+        conn = new WebSocket(`wss://${location.host}/ws`);
+        conn.onopen = () => {
+          conn.send(`JOIN|${nickname}`);
+          setStatus('Connected (WebSocket)');
+          reconnectDelay = 1000;
+        };
+        conn.onmessage = handleMessage;
+        conn.onclose = handleDisconnect;
+      } catch (e) {
+        handleDisconnect();
+      }
+    }
+
+    async function handleWebTransport(transport) {
+      const writer = transport.datagrams.writable.getWriter();
+      await writer.write(new TextEncoder().encode(`JOIN|${nickname}`));
+      writer.releaseLock();
+
+      const reader = transport.datagrams.readable.getReader();
+      while (true) {
+        try {
+          const { value, done } = await reader.read();
+          if (done) break;
+          const msg = new TextDecoder().decode(value);
+          handleMessage({ data: msg });
+        } catch (e) {
+          break;
+        }
+      }
+    }
+
+    function handleMessage(event) {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(event.data, 'text/html');
+      const fragment = doc.body.firstElementChild;
+
+      if (!fragment) return;
+
+      const target = document.querySelector(fragment.dataset.target);
+      const action = fragment.dataset.action || 'replace';
+
+      if (!target) return;
+
+      const msgId = fragment.querySelector('[data-id]')?.dataset.id;
+      if (msgId && pendingMessages.has(msgId)) {
+        const sentTime = pendingMessages.get(msgId);
+        const latency = Date.now() - sentTime;
+        const latencySpan = document.createElement('span');
+        latencySpan.className = 'latency';
+        latencySpan.textContent = ` (${latency}ms)`;
+        fragment.querySelector('.msg').appendChild(latencySpan);
+        pendingMessages.delete(msgId);
+      }
+
+      if (action === 'append') {
+        target.append(...fragment.childNodes);
+        target.scrollTop = target.scrollHeight;
+      } else if (action === 'prepend') {
+        target.prepend(...fragment.childNodes);
+      } else if (action === 'replace') {
+        target.replaceWith(fragment);
+      }
+    }
+
+    function handleDisconnect() {
+      setStatus(`Disconnected. Reconnecting in ${reconnectDelay/1000}s...`);
+      setTimeout(() => {
+        reconnectDelay = Math.min(reconnectDelay * 2, 30000);
+        connect();
+      }, reconnectDelay);
+    }
+
+    function setStatus(msg) {
+      document.getElementById('connection-status').textContent = msg;
+    }
+
+    function sendMessage() {
+      const input = document.getElementById('msg-input');
+      const text = input.value.trim();
+      if (!text) return;
+
+      const msgId = Date.now();
+      pendingMessages.set(msgId.toString(), Date.now());
+
+      const message = `SEND|${nickname}|${text}`;
+
+      if (conn instanceof WebTransport) {
+        conn.datagrams.writable.getWriter()
+          .write(new TextEncoder().encode(message))
+          .then(w => w.releaseLock());
+      } else if (conn instanceof WebSocket) {
+        conn.send(message);
+      }
+
+      input.value = '';
+
+      setTimeout(() => pendingMessages.delete(msgId.toString()), 5000);
+    }
+
+    document.getElementById('send-btn').onclick = sendMessage;
+    document.getElementById('msg-input').onkeypress = (e) => {
+      if (e.key === 'Enter') sendMessage();
+    };
+
+    // Load more history (in packets of 10)
+    function loadMoreHistory() {
+      if (historyLoading || !conn) return;
+      historyLoading = true;
+
+      // Request next 10 messages (skip 10 initial + already loaded)
+      const skip = 10 + historyLoaded;
+      const msg = `HISTORY|${skip}|10`;
+
+      if (conn instanceof WebTransport) {
+        conn.datagrams.writable.getWriter()
+          .write(new TextEncoder().encode(msg))
+          .then(w => w.releaseLock());
+      } else if (conn instanceof WebSocket) {
+        conn.send(msg);
+      }
+
+      historyLoaded += 10;
+      setTimeout(() => { historyLoading = false; }, 500);
+    }
+
+    // Auto-load history on scroll to top
+    document.getElementById('messages').onscroll = (e) => {
+      if (e.target.scrollTop < 100 && !historyLoading) {
+        loadMoreHistory();
+      }
+    };
+
+    connect();
+
+    // Load first packet of history after connection
+    setTimeout(() => {
+      loadMoreHistory();
+    }, 100);
+  </script>
+</body>
+</html>
