@@ -34,10 +34,18 @@
   </div>
 
   <script>
-    const nickname = "{{NICKNAME}}";
+    // Sticky nickname: try to reuse from sessionStorage, fallback to server-assigned
+    let nickname = sessionStorage.getItem('chatNickname') || "{{NICKNAME}}";
+    sessionStorage.setItem('chatNickname', nickname);
+
+    // Update UI with sticky nickname
+    document.getElementById('nickname').textContent = nickname;
+
     let conn = null;
     let reconnectDelay = 1000;
     const pendingMessages = new Map();
+    let historyLoaded = 0; // Track how many history messages we've loaded
+    let historyLoading = false;
 
     async function connect() {
       try {
@@ -158,19 +166,39 @@
       if (e.key === 'Enter') sendMessage();
     };
 
+    // Load more history (in packets of 10)
+    function loadMoreHistory() {
+      if (historyLoading || !conn) return;
+      historyLoading = true;
+
+      // Request next 10 messages (skip 10 initial + already loaded)
+      const skip = 10 + historyLoaded;
+      const msg = `HISTORY|${skip}|10`;
+
+      if (conn instanceof WebTransport) {
+        conn.datagrams.writable.getWriter()
+          .write(new TextEncoder().encode(msg))
+          .then(w => w.releaseLock());
+      } else if (conn instanceof WebSocket) {
+        conn.send(msg);
+      }
+
+      historyLoaded += 10;
+      setTimeout(() => { historyLoading = false; }, 500);
+    }
+
+    // Auto-load history on scroll to top
+    document.getElementById('messages').onscroll = (e) => {
+      if (e.target.scrollTop < 100 && !historyLoading) {
+        loadMoreHistory();
+      }
+    };
+
     connect();
 
+    // Load first packet of history after connection
     setTimeout(() => {
-      if (conn) {
-        const msg = 'HISTORY|90';
-        if (conn instanceof WebTransport) {
-          conn.datagrams.writable.getWriter()
-            .write(new TextEncoder().encode(msg))
-            .then(w => w.releaseLock());
-        } else {
-          conn.send(msg);
-        }
-      }
+      loadMoreHistory();
     }, 100);
   </script>
 </body>

@@ -21,6 +21,7 @@ const (
 	h3Addr   = ":8443"  // HTTP/3 on UDP (same port, different protocol)
 	certFile = "certs/cert.pem"
 	keyFile  = "certs/key.pem"
+	logFile  = "logs/messages.jsonl" // Message log file
 )
 
 // altSvcMiddleware adds Alt-Svc header to advertise HTTP/3 availability
@@ -33,8 +34,17 @@ func altSvcMiddleware(next http.Handler) http.Handler {
 }
 
 func main() {
-	// Create chat state
-	state := chat.NewChatState()
+	// Ensure logs directory exists
+	if err := os.MkdirAll("logs", 0755); err != nil {
+		log.Fatalf("Failed to create logs directory: %v", err)
+	}
+
+	// Create chat state with message logging
+	state, err := chat.NewChatState(logFile)
+	if err != nil {
+		log.Fatalf("Failed to create chat state: %v", err)
+	}
+	defer state.Close()
 	log.Println("Chat state initialized")
 
 	// Load TLS certificate
@@ -76,8 +86,17 @@ func main() {
 	// Create mux for HTTP handlers
 	mux := http.NewServeMux()
 
-	// Index handler
-	mux.HandleFunc("/", handlers.IndexHandler(state))
+	// Index handler (only on exact "/" path)
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" {
+			http.NotFound(w, r)
+			return
+		}
+		handlers.IndexHandler(state)(w, r)
+	})
+
+	// Favicon handler
+	mux.HandleFunc("/favicon.ico", handlers.FaviconHandler())
 
 	// WebSocket handler (works on both HTTP/2 and HTTP/3)
 	mux.HandleFunc("/ws", handlers.WebSocketHandler(state))

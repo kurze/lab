@@ -16,17 +16,57 @@ type ChatState struct {
 	messages     []*Message
 	connections  map[uuid.UUID]*Connection
 	nicknamePool *NicknamePool
+	logger       *MessageLogger
 	nextID       atomic.Int64
 	mu           sync.RWMutex
 }
 
 // NewChatState creates a new chat state
-func NewChatState() *ChatState {
-	return &ChatState{
+func NewChatState(logFile string) (*ChatState, error) {
+	// Create logger
+	logger, err := NewMessageLogger(logFile)
+	if err != nil {
+		return nil, err
+	}
+
+	state := &ChatState{
 		messages:     make([]*Message, 0, MaxMessages),
 		connections:  make(map[uuid.UUID]*Connection),
 		nicknamePool: NewNicknamePool(),
+		logger:       logger,
 	}
+
+	// Load messages from log file
+	loadedMessages, err := LoadMessages(logFile)
+	if err != nil {
+		logger.Close()
+		return nil, err
+	}
+
+	// Populate circular buffer with last 100 messages
+	if len(loadedMessages) > 0 {
+		start := 0
+		if len(loadedMessages) > MaxMessages {
+			start = len(loadedMessages) - MaxMessages
+		}
+		state.messages = loadedMessages[start:]
+
+		// Update nextID to continue from last message
+		if len(state.messages) > 0 {
+			lastID := state.messages[len(state.messages)-1].ID
+			state.nextID.Store(lastID)
+		}
+	}
+
+	return state, nil
+}
+
+// Close gracefully shuts down the chat state
+func (s *ChatState) Close() error {
+	if s.logger != nil {
+		return s.logger.Close()
+	}
+	return nil
 }
 
 // AddMessage adds a message to the circular buffer
@@ -43,6 +83,11 @@ func (s *ChatState) AddMessage(nickname, text string) *Message {
 		s.messages = s.messages[1:]
 	}
 	s.messages = append(s.messages, msg)
+
+	// Log message asynchronously
+	if s.logger != nil {
+		s.logger.Log(msg)
+	}
 
 	return msg
 }

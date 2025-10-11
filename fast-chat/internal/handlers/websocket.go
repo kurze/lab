@@ -156,13 +156,32 @@ func handleClientMessage(data string, conn *chat.Connection, state *chat.ChatSta
 		if len(parts) < 2 {
 			return
 		}
-		count, err := strconv.Atoi(parts[1])
-		if err != nil || count <= 0 {
-			return
+
+		// Support both old format (HISTORY|count) and new format (HISTORY|skip|take)
+		var skip, take int
+		var err error
+
+		if len(parts) >= 3 {
+			// New format: HISTORY|skip|take
+			skip, err = strconv.Atoi(parts[1])
+			if err != nil || skip < 0 {
+				return
+			}
+			take, err = strconv.Atoi(parts[2])
+			if err != nil || take <= 0 {
+				return
+			}
+		} else {
+			// Old format: HISTORY|count (for backward compatibility)
+			take, err = strconv.Atoi(parts[1])
+			if err != nil || take <= 0 {
+				return
+			}
+			skip = 10 // Skip initial 10
 		}
 
-		// Get history (skip last 10 already sent, take next 'count')
-		messages := state.GetHistory(10, count)
+		// Get history
+		messages := state.GetHistory(skip, take)
 
 		// Send history as prepend fragment
 		if len(messages) > 0 {
