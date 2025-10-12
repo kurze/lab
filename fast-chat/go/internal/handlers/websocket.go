@@ -44,10 +44,11 @@ func WebSocketHandler(state *chat.ChatState) http.HandlerFunc {
 // wsReader reads messages from the WebSocket
 func wsReader(ws *websocket.Conn, conn *chat.Connection, state *chat.ChatState) {
 	defer func() {
-		nickname := conn.GetNickname()
-		state.RemoveConnection(conn.ID)
+		// Remove connection and get nickname if this is the first cleanup
+		nickname := state.RemoveConnection(conn.ID)
 		ws.Close()
 
+		// Only broadcast if we actually removed it (prevents duplicates)
 		if nickname != "" {
 			// Broadcast user left
 			sysMsg := chat.SystemMessage(nickname + " left the chat")
@@ -56,9 +57,11 @@ func wsReader(ws *websocket.Conn, conn *chat.Connection, state *chat.ChatState) 
 			// Update user count
 			count := state.ConnectionCount()
 			state.Broadcast(chat.UserCountHTML(count))
-		}
 
-		log.Printf("WebSocket connection closed: %s", conn.ID)
+			log.Printf("WebSocket user %s disconnected (%s)", nickname, conn.ID)
+		} else {
+			log.Printf("WebSocket connection already cleaned up: %s", conn.ID)
+		}
 	}()
 
 	ws.SetReadDeadline(time.Now().Add(60 * time.Second))

@@ -95,6 +95,10 @@ func main() {
 		handlers.IndexHandler(state)(w, r)
 	})
 
+	// Static resources (embedded, with HTTP/2 push support, ETags, and compression)
+	mux.HandleFunc("/chat.css", handlers.ChatCSSHandler())
+	mux.HandleFunc("/chat.js", handlers.ChatJSHandler(state))
+
 	// Favicon handler
 	mux.HandleFunc("/favicon.ico", handlers.FaviconHandler())
 
@@ -102,19 +106,41 @@ func main() {
 	mux.HandleFunc("/ws", handlers.WebSocketHandler(state))
 
 	// WebTransport handler (HTTP/3 only)
-	mux.HandleFunc("/chat", handlers.WebTransportHandler(state, wtServer))
+	// WebTransport uses CONNECT method and should NOT have compression middleware
+	mux.HandleFunc("/chat", func(w http.ResponseWriter, r *http.Request) {
+		session, err := wtServer.Upgrade(w, r)
+		if err != nil {
+			log.Printf("WebTransport upgrade failed: %v", err)
+			http.Error(w, "WebTransport upgrade failed", http.StatusInternalServerError)
+			return
+		}
+		handlers.HandleWebTransportSession(session, state)
+	})
 
-	// Wrap mux with Alt-Svc middleware
-	handlerWithAltSvc := altSvcMiddleware(mux)
+	// Wrap with Alt-Svc middleware (but NOT compression for WebTransport)
+	// We need a selective middleware that skips compression for WebTransport
+	handlerWithMiddleware := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Always add Alt-Svc header
+		w.Header().Set("Alt-Svc", `h3=":8443"; ma=86400`)
 
-	// Set handler for both servers
-	wtServer.H3.Handler = handlerWithAltSvc
+		// Skip compression for WebTransport CONNECT requests
+		if r.Method == "CONNECT" && r.URL.Path == "/chat" {
+			mux.ServeHTTP(w, r)
+			return
+		}
+
+		// Apply compression for all other requests
+		handlers.GzipMiddleware(mux).ServeHTTP(w, r)
+	})
+
+	// Set handler for HTTP/3 server
+	wtServer.H3.Handler = handlerWithMiddleware
 
 	// Create HTTP/2 server
 	h2Server := &http.Server{
 		Addr:      h2Addr,
 		TLSConfig: tlsConfigH2,
-		Handler:   handlerWithAltSvc,
+		Handler:   handlerWithMiddleware,
 	}
 
 	// Start both servers
@@ -134,14 +160,10 @@ func main() {
 	}()
 
 	// Start HTTP/3 server (UDP - will work on same port as HTTP/2 TCP)
+	// Use the WebTransport server's own ListenAndServeTLS method
 	go func() {
 		log.Println("HTTP/3 server starting...")
-		listener, err := quic.ListenAddr(h3Addr, tlsConfigH3, quicConfig)
-		if err != nil {
-			serverErr <- err
-			return
-		}
-		serverErr <- wtServer.H3.ServeListener(listener)
+		serverErr <- wtServer.ListenAndServeTLS(certFile, keyFile)
 	}()
 
 	// Wait for interrupt signal

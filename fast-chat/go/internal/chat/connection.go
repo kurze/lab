@@ -1,7 +1,7 @@
 package chat
 
 import (
-	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -18,42 +18,46 @@ const (
 // Connection represents a client connection
 type Connection struct {
 	ID        uuid.UUID
-	Nickname  string
+	nickname  atomic.Value  // stores string
 	Transport TransportType
-	LastSeen  time.Time
-	SendChan  chan string // Channel for sending messages to this connection
-	mu        sync.RWMutex
+	lastSeen  atomic.Int64  // Unix nano timestamp
+	SendChan  chan string   // Channel for sending messages to this connection
+	closed    atomic.Bool   // Track if connection is already closed
 }
 
 // NewConnection creates a new connection
 func NewConnection(transport TransportType) *Connection {
-	return &Connection{
+	conn := &Connection{
 		ID:        uuid.New(),
 		Transport: transport,
-		LastSeen:  time.Now(),
 		SendChan:  make(chan string, 256), // Buffered channel
 	}
+	conn.lastSeen.Store(time.Now().UnixNano())
+	conn.nickname.Store("") // Initialize with empty string
+	return conn
 }
 
-// SetNickname sets the connection's nickname
+// SetNickname sets the connection's nickname (lock-free)
 func (c *Connection) SetNickname(nickname string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.Nickname = nickname
+	c.nickname.Store(nickname)
 }
 
-// GetNickname gets the connection's nickname
+// GetNickname gets the connection's nickname (lock-free)
 func (c *Connection) GetNickname() string {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.Nickname
+	if val := c.nickname.Load(); val != nil {
+		return val.(string)
+	}
+	return ""
 }
 
-// UpdateLastSeen updates the last seen timestamp
+// UpdateLastSeen updates the last seen timestamp (lock-free)
 func (c *Connection) UpdateLastSeen() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.LastSeen = time.Now()
+	c.lastSeen.Store(time.Now().UnixNano())
+}
+
+// GetLastSeen gets the last seen timestamp (lock-free)
+func (c *Connection) GetLastSeen() time.Time {
+	return time.Unix(0, c.lastSeen.Load())
 }
 
 // Send sends a message to this connection (non-blocking)
@@ -65,7 +69,14 @@ func (c *Connection) Send(msg string) {
 	}
 }
 
-// Close closes the connection's send channel
+// Close closes the connection's send channel (idempotent, safe to call multiple times)
 func (c *Connection) Close() {
-	close(c.SendChan)
+	if c.closed.CompareAndSwap(false, true) {
+		close(c.SendChan)
+	}
+}
+
+// IsClosed returns whether the connection has been closed
+func (c *Connection) IsClosed() bool {
+	return c.closed.Load()
 }

@@ -31,22 +31,23 @@ func HandleWebTransportSession(session *webtransport.Session, state *chat.ChatSt
 
 	log.Printf("New WebTransport connection: %s", conn.ID)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	// Use session context to detect when client disconnects
+	ctx := session.Context()
 
 	// Start writer goroutine for datagrams
 	go wtWriter(ctx, session, conn)
 
-	// Handle incoming datagrams
+	// Handle incoming datagrams (blocks until connection closes)
 	wtReader(ctx, session, conn, state)
 }
 
 // wtReader reads datagrams from WebTransport
 func wtReader(ctx context.Context, session *webtransport.Session, conn *chat.Connection, state *chat.ChatState) {
 	defer func() {
-		nickname := conn.GetNickname()
-		state.RemoveConnection(conn.ID)
+		// Remove connection and get nickname if this is the first cleanup
+		nickname := state.RemoveConnection(conn.ID)
 
+		// Only broadcast if we actually removed it (prevents duplicates)
 		if nickname != "" {
 			// Broadcast user left
 			sysMsg := chat.SystemMessage(nickname + " left the chat")
@@ -55,9 +56,11 @@ func wtReader(ctx context.Context, session *webtransport.Session, conn *chat.Con
 			// Update user count
 			count := state.ConnectionCount()
 			state.Broadcast(chat.UserCountHTML(count))
-		}
 
-		log.Printf("WebTransport connection closed: %s", conn.ID)
+			log.Printf("WebTransport user %s disconnected (%s)", nickname, conn.ID)
+		} else {
+			log.Printf("WebTransport connection already cleaned up: %s", conn.ID)
+		}
 	}()
 
 	for {
@@ -77,12 +80,14 @@ func wtReader(ctx context.Context, session *webtransport.Session, conn *chat.Con
 				// Timeout, check if connection is still alive
 				continue
 			}
-			log.Printf("WebTransport receive error: %v", err)
+			log.Printf("WebTransport receive error for %s: %v", conn.ID, err)
 			return
 		}
 
 		conn.UpdateLastSeen()
-		handleClientMessage(string(data), conn, state)
+		msg := string(data)
+		log.Printf("WebTransport received from %s: %s", conn.ID, msg[:min(50, len(msg))])
+		handleClientMessage(msg, conn, state)
 	}
 }
 
@@ -92,18 +97,29 @@ func wtWriter(ctx context.Context, session *webtransport.Session, conn *chat.Con
 		select {
 		case message, ok := <-conn.SendChan:
 			if !ok {
+				log.Printf("WebTransport send channel closed for %s", conn.ID)
 				return
 			}
 
+			log.Printf("WebTransport sending to %s: %s", conn.ID, message[:min(50, len(message))])
 			err := session.SendDatagram([]byte(message))
 
 			if err != nil {
-				log.Printf("WebTransport send error: %v", err)
+				log.Printf("WebTransport send error for %s: %v", conn.ID, err)
 				return
 			}
 
 		case <-ctx.Done():
+			log.Printf("WebTransport writer context done for %s", conn.ID)
 			return
 		}
 	}
+}
+
+// min returns the minimum of two integers
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

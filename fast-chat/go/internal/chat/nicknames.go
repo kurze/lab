@@ -3,6 +3,7 @@ package chat
 import (
 	"math/rand"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -91,10 +92,12 @@ const (
 
 // NicknamePool manages a pool of available nicknames
 type NicknamePool struct {
-	available []string
-	used      map[string]bool
-	mu        sync.Mutex
-	rng       *rand.Rand
+	available     []string
+	used          map[string]bool
+	mu            sync.Mutex
+	rng           *rand.Rand
+	availableSize atomic.Int32 // Cache of len(available) for lock-free reads
+	usedSize      atomic.Int32 // Cache of len(used) for lock-free reads
 }
 
 // NewNicknamePool creates a new nickname pool
@@ -107,6 +110,8 @@ func NewNicknamePool() *NicknamePool {
 
 	// Generate initial small batch
 	pool.generateNicknames(initialPoolSize)
+	pool.availableSize.Store(int32(len(pool.available)))
+	pool.usedSize.Store(0)
 
 	return pool
 }
@@ -161,6 +166,7 @@ func (p *NicknamePool) Allocate() string {
 			nickname := adj + "_" + name
 			if !p.used[nickname] {
 				p.used[nickname] = true
+				p.usedSize.Add(1)
 				return nickname
 			}
 		}
@@ -170,6 +176,10 @@ func (p *NicknamePool) Allocate() string {
 	nickname := p.available[len(p.available)-1]
 	p.available = p.available[:len(p.available)-1]
 	p.used[nickname] = true
+
+	// Update atomic counters
+	p.availableSize.Add(-1)
+	p.usedSize.Add(1)
 
 	return nickname
 }
@@ -186,18 +196,18 @@ func (p *NicknamePool) Release(nickname string) {
 
 	delete(p.used, nickname)
 	p.available = append(p.available, nickname)
+
+	// Update atomic counters
+	p.availableSize.Add(1)
+	p.usedSize.Add(-1)
 }
 
-// Available returns the number of available nicknames
+// Available returns the number of available nicknames (lock-free read)
 func (p *NicknamePool) Available() int {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return len(p.available)
+	return int(p.availableSize.Load())
 }
 
-// Used returns the number of used nicknames
+// Used returns the number of used nicknames (lock-free read)
 func (p *NicknamePool) Used() int {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return len(p.used)
+	return int(p.usedSize.Load())
 }
