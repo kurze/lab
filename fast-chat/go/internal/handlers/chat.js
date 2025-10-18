@@ -11,8 +11,14 @@ let historyLoading = false;
 async function connect() {
   try {
     if ('WebTransport' in window) {
-      conn = new WebTransport(`https://${location.host}/chat`);
-      await conn.ready;
+      // Reuse early connection if available
+      if (window.__earlyWT) {
+        conn = window.__earlyWT;
+        delete window.__earlyWT;
+      } else {
+        conn = new WebTransport(`https://${location.host}/chat`);
+        await conn.ready;
+      }
       handleWebTransport(conn);
       setStatus('Connected (WebTransport)');
       reconnectDelay = 1000;
@@ -61,35 +67,85 @@ async function handleWebTransport(transport) {
 }
 
 function handleMessage(event) {
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(event.data, 'text/html');
-  const fragment = doc.body.firstElementChild;
+  console.log('Received raw message:', event.data);
 
-  if (!fragment) return;
-
-  const target = document.querySelector(fragment.dataset.target);
-  const action = fragment.dataset.action || 'replace';
-
-  if (!target) return;
-
-  const msgId = fragment.querySelector('[data-id]')?.dataset.id;
-  if (msgId && pendingMessages.has(msgId)) {
-    const sentTime = pendingMessages.get(msgId);
-    const latency = Date.now() - sentTime;
-    const latencySpan = document.createElement('span');
-    latencySpan.className = 'latency';
-    latencySpan.textContent = ` (${latency}ms)`;
-    fragment.querySelector('.msg').appendChild(latencySpan);
-    pendingMessages.delete(msgId);
+  let msg;
+  try {
+    msg = JSON.parse(event.data);
+    console.log('Parsed message:', msg);
+  } catch (e) {
+    console.error('Failed to parse message:', e);
+    console.error('Raw data:', event.data);
+    setStatus('⚠️ Received malformed message');
+    return;
   }
 
-  if (action === 'append') {
-    target.append(...fragment.childNodes);
-    target.scrollTop = target.scrollHeight;
-  } else if (action === 'prepend') {
-    target.prepend(...fragment.childNodes);
-  } else if (action === 'replace') {
-    target.replaceWith(fragment);
+  if (!msg || !msg.type) {
+    console.error('Invalid message structure:', msg);
+    setStatus('⚠️ Invalid message received');
+    return;
+  }
+
+  const messagesEl = document.getElementById('messages');
+  const userCountEl = document.getElementById('user-count');
+
+  switch (msg.type) {
+    case 'error':
+      console.error('Server error:', msg.data);
+      setStatus(`❌ Error: ${msg.data}`);
+      return;
+    case 'message':
+      const msgDiv = document.createElement('div');
+      msgDiv.className = msg.data.isSystem ? 'sys' : 'msg';
+
+      if (!msg.data.isSystem) {
+        msgDiv.dataset.id = msg.data.id;
+
+        let html = `<span class="nick">${msg.data.nickname}</span><span class="text">${msg.data.text}</span><time>${msg.data.time}</time>`;
+        
+        if (msg.data.clientId && pendingMessages.has(msg.data.clientId)) {
+          const sentTime = pendingMessages.get(msg.data.clientId);
+          const latency = Date.now() - sentTime;
+          html += `<span class="latency"> (${latency}ms)</span>`;
+          pendingMessages.delete(msg.data.clientId);
+        }
+        
+        msgDiv.innerHTML = html;
+      } else {
+        msgDiv.textContent = msg.data.text;
+      }
+
+      if (msg.action === 'prepend') {
+        messagesEl.prepend(msgDiv);
+      } else {
+        messagesEl.appendChild(msgDiv);
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+      }
+      break;
+
+    case 'history':
+      // Handle batch of history messages
+      if (!msg.data || !Array.isArray(msg.data)) return;
+
+      // Create document fragment for batch insert
+      const fragment = document.createDocumentFragment();
+      for (const msgData of msg.data) {
+        const msgDiv = document.createElement('div');
+        msgDiv.className = 'msg';
+        msgDiv.dataset.id = msgData.id;
+        
+        // Batch write with innerHTML
+        msgDiv.innerHTML = `<span class="nick">${msgData.nickname}</span><span class="text">${msgData.text}</span><time>${msgData.time}</time>`;
+        
+        fragment.appendChild(msgDiv);
+      }
+
+      messagesEl.prepend(fragment);
+      break;
+
+    case 'usercount':
+      userCountEl.textContent = msg.data;
+      break;
   }
 }
 
@@ -110,10 +166,8 @@ function sendMessage() {
   const text = input.value.trim();
   if (!text) return;
 
-  const msgId = Date.now();
-  pendingMessages.set(msgId.toString(), Date.now());
-
-  const message = `SEND|${nickname}|${text}`;
+  const clientId = Date.now().toString();
+  const message = `SEND|${nickname}|${text}|${clientId}`;
 
   if (conn instanceof WebTransport) {
     const writer = conn.datagrams.writable.getWriter();
@@ -123,9 +177,11 @@ function sendMessage() {
     conn.send(message);
   }
 
+  pendingMessages.set(clientId, Date.now());
+
   input.value = '';
 
-  setTimeout(() => pendingMessages.delete(msgId.toString()), 5000);
+  setTimeout(() => pendingMessages.delete(clientId), 5000);
 }
 
 document.getElementById('send-btn').onclick = sendMessage;
@@ -154,10 +210,15 @@ function loadMoreHistory() {
   setTimeout(() => { historyLoading = false; }, 500);
 }
 
-// Auto-load history on scroll to top
+// Auto-load history on scroll to top (debounced)
+let scrollTimeout;
 document.getElementById('messages').onscroll = (e) => {
+  if (scrollTimeout) return;
   if (e.target.scrollTop < 100 && !historyLoading) {
-    loadMoreHistory();
+    scrollTimeout = setTimeout(() => {
+      loadMoreHistory();
+      scrollTimeout = null;
+    }, 50);
   }
 };
 
@@ -175,10 +236,14 @@ if (!nickname) {
 
 connect();
 
-// Load first packet of history after connection
-setTimeout(() => {
-  loadMoreHistory();
-}, 100);
+// Load first packet of history immediately (no delay!)
+// Wait for connection to be established first
+const checkConnectionAndLoadHistory = setInterval(() => {
+  if (conn) {
+    loadMoreHistory();
+    clearInterval(checkConnectionAndLoadHistory);
+  }
+}, 10); // Check every 10ms instead of waiting 100ms
 
 // Performance monitoring - report when fully initialized
 performance.mark('chat-init-end');

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"log"
 	"net/http"
 	"strconv"
@@ -11,16 +12,37 @@ import (
 	"github.com/kurze/lab/internal/chat"
 )
 
-var upgrader = websocket.Upgrader{
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
-	CheckOrigin: func(r *http.Request) bool {
-		return true // Allow all origins for POC
-	},
+func createEchoMessage(msg *chat.Message, clientID string) string {
+	echoData := chat.MessageData{
+		ID:       strconv.FormatInt(msg.ID, 10),
+		Nickname: msg.Nickname,
+		Text:     msg.Text,
+		Time:     msg.Timestamp.Format("15:04:05.000"),
+		ClientID: clientID,
+		ServerID: strconv.FormatInt(msg.ID, 10),
+	}
+
+	echoMsg := chat.ClientMessage{
+		Type:      "message",
+		Action:    "append",
+		Timestamp: time.Now().UnixMilli(),
+		Data:      echoData,
+	}
+
+	bytes, err := json.Marshal(echoMsg)
+	if err != nil {
+		return `{"type":"error","data":"Failed to encode echo message"}`
+	}
+	return string(bytes)
 }
 
-// WebSocketHandler handles WebSocket connections
-func WebSocketHandler(state *chat.ChatState) http.HandlerFunc {
+func WebSocketHandler(state *chat.ChatState, checkOrigin func(*http.Request) bool) http.HandlerFunc {
+	upgrader := websocket.Upgrader{
+		ReadBufferSize:  1024,
+		WriteBufferSize: 1024,
+		CheckOrigin:     checkOrigin,
+	}
+
 	return func(w http.ResponseWriter, r *http.Request) {
 		ws, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
@@ -50,13 +72,13 @@ func wsReader(ws *websocket.Conn, conn *chat.Connection, state *chat.ChatState) 
 
 		// Only broadcast if we actually removed it (prevents duplicates)
 		if nickname != "" {
-			// Broadcast user left
-			sysMsg := chat.SystemMessage(nickname + " left the chat")
+			// Broadcast user left (JSON)
+			sysMsg := chat.SystemMessageJSON(nickname + " left the chat")
 			state.Broadcast(sysMsg)
 
-			// Update user count
+			// Update user count (JSON)
 			count := state.ConnectionCount()
-			state.Broadcast(chat.UserCountHTML(count))
+			state.Broadcast(chat.UserCountJSON(count))
 
 			log.Printf("WebSocket user %s disconnected (%s)", nickname, conn.ID)
 		} else {
@@ -131,13 +153,13 @@ func handleClientMessage(data string, conn *chat.Connection, state *chat.ChatSta
 		nickname := parts[1]
 		conn.SetNickname(nickname)
 
-		// Broadcast system message
-		sysMsg := chat.SystemMessage(nickname + " joined the chat")
+		// Broadcast system message (JSON)
+		sysMsg := chat.SystemMessageJSON(nickname + " joined the chat")
 		state.Broadcast(sysMsg)
 
-		// Update user count
+		// Update user count (JSON)
 		count := state.ConnectionCount()
-		state.Broadcast(chat.UserCountHTML(count))
+		state.Broadcast(chat.UserCountJSON(count))
 
 		log.Printf("User %s joined (conn: %s)", nickname, conn.ID)
 
@@ -148,10 +170,20 @@ func handleClientMessage(data string, conn *chat.Connection, state *chat.ChatSta
 		nickname := parts[1]
 		text := parts[2]
 
-		// Add message and broadcast
+		var clientID string
+		if len(parts) >= 4 {
+			clientID = parts[3]
+		}
+
 		msg := state.AddMessage(nickname, text)
-		html := msg.ToHTML()
-		state.Broadcast(html)
+
+		if clientID != "" {
+			echoMsg := createEchoMessage(msg, clientID)
+			conn.Send(echoMsg)
+		}
+
+		jsonMsg := msg.ToJSON()
+		state.BroadcastExcept(jsonMsg, conn.ID)
 
 		log.Printf("Message from %s: %s", nickname, text)
 
@@ -183,33 +215,39 @@ func handleClientMessage(data string, conn *chat.Connection, state *chat.ChatSta
 			skip = 10 // Skip initial 10
 		}
 
+		const maxHistoryTake = 100
+		const maxHistorySkip = 10000
+		if take > maxHistoryTake {
+			take = maxHistoryTake
+		}
+		if skip > maxHistorySkip {
+			skip = maxHistorySkip
+		}
+
 		// Get history
 		messages := state.GetHistory(skip, take)
 
-		// Send history as prepend fragment
+		// Send history as JSON with prepend action
 		if len(messages) > 0 {
-			var html strings.Builder
-			html.WriteString(`<div data-target="#messages" data-action="prepend">`)
-			for _, msg := range messages {
-				html.WriteString(`
-  <div class="msg" data-id="`)
-				html.WriteString(formatInt64(msg.ID))
-				html.WriteString(`">
-    <span class="nick">`)
-				html.WriteString(msg.Nickname)
-				html.WriteString(`</span>
-    <span class="text">`)
-				html.WriteString(msg.Text)
-				html.WriteString(`</span>
-    <time>`)
-				html.WriteString(msg.Timestamp.Format("15:04:05.000"))
-				html.WriteString(`</time>
-  </div>`)
+			historyData := make([]chat.MessageData, len(messages))
+			for i, msg := range messages {
+				historyData[i] = chat.MessageData{
+					ID:       strconv.FormatInt(msg.ID, 10),
+					Nickname: msg.Nickname,
+					Text:     msg.Text,
+					Time:     msg.Timestamp.Format("15:04:05.000"),
+				}
 			}
-			html.WriteString(`
-</div>`)
 
-			conn.Send(html.String())
+			historyMsg := chat.ClientMessage{
+				Type:      "history",
+				Action:    "prepend",
+				Timestamp: time.Now().UnixMilli(),
+				Data:      historyData,
+			}
+
+			jsonBytes, _ := json.Marshal(historyMsg)
+			conn.Send(string(jsonBytes))
 		}
 
 	case "PING":

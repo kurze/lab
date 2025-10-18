@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/quic-go/webtransport-go"
 	"github.com/kurze/lab/internal/chat"
+	"github.com/quic-go/webtransport-go"
 )
 
 // WebTransportHandler creates a WebTransport handler
@@ -49,13 +49,13 @@ func wtReader(ctx context.Context, session *webtransport.Session, conn *chat.Con
 
 		// Only broadcast if we actually removed it (prevents duplicates)
 		if nickname != "" {
-			// Broadcast user left
-			sysMsg := chat.SystemMessage(nickname + " left the chat")
+			// Broadcast user left (JSON)
+			sysMsg := chat.SystemMessageJSON(nickname + " left the chat")
 			state.Broadcast(sysMsg)
 
-			// Update user count
+			// Update user count (JSON)
 			count := state.ConnectionCount()
-			state.Broadcast(chat.UserCountHTML(count))
+			state.Broadcast(chat.UserCountJSON(count))
 
 			log.Printf("WebTransport user %s disconnected (%s)", nickname, conn.ID)
 		} else {
@@ -93,6 +93,9 @@ func wtReader(ctx context.Context, session *webtransport.Session, conn *chat.Con
 
 // wtWriter writes datagrams to WebTransport
 func wtWriter(ctx context.Context, session *webtransport.Session, conn *chat.Connection) {
+	const maxRetries = 3
+	const retryDelay = 50 * time.Millisecond
+
 	for {
 		select {
 		case message, ok := <-conn.SendChan:
@@ -102,11 +105,29 @@ func wtWriter(ctx context.Context, session *webtransport.Session, conn *chat.Con
 			}
 
 			log.Printf("WebTransport sending to %s: %s", conn.ID, message[:min(50, len(message))])
-			err := session.SendDatagram([]byte(message))
 
-			if err != nil {
-				log.Printf("WebTransport send error for %s: %v", conn.ID, err)
-				return
+			isCritical := len(message) > 0 && (message[0] == '{' ||
+				(len(message) > 4 && (message[:4] == "JOIN" || message[:4] == "HIST")))
+
+			var err error
+			if isCritical {
+				for attempt := 0; attempt < maxRetries; attempt++ {
+					err = session.SendDatagram([]byte(message))
+					if err == nil {
+						break
+					}
+					if attempt < maxRetries-1 {
+						time.Sleep(retryDelay * time.Duration(attempt+1))
+					}
+				}
+				if err != nil {
+					log.Printf("WebTransport critical message failed after %d retries for %s: %v", maxRetries, conn.ID, err)
+				}
+			} else {
+				err = session.SendDatagram([]byte(message))
+				if err != nil {
+					log.Printf("WebTransport send error for %s: %v", conn.ID, err)
+				}
 			}
 
 		case <-ctx.Done():

@@ -1,54 +1,66 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
+	"github.com/kurze/lab/internal/chat"
+	"github.com/kurze/lab/internal/handlers"
 	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
 	"github.com/quic-go/webtransport-go"
-	"github.com/kurze/lab/internal/chat"
-	"github.com/kurze/lab/internal/handlers"
 )
 
 const (
-	h2Addr   = ":8443"  // HTTP/2 on TCP
-	h3Addr   = ":8443"  // HTTP/3 on UDP (same port, different protocol)
-	certFile = "../certs/cert.pem"
-	keyFile  = "../certs/key.pem"
-	logFile  = "../logs/messages.jsonl" // Message log file
+	defaultConfigFile = "../config.json"
 )
 
-// altSvcMiddleware adds Alt-Svc header to advertise HTTP/3 availability
-func altSvcMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Advertise HTTP/3 on same port with 24h max-age
-		w.Header().Set("Alt-Svc", `h3=":8443"; ma=86400`)
-		next.ServeHTTP(w, r)
-	})
+func checkOrigin(allowedOrigins []string) func(*http.Request) bool {
+	return func(r *http.Request) bool {
+		origin := r.Header.Get("Origin")
+
+		if origin == "" {
+			return true
+		}
+
+		for _, allowed := range allowedOrigins {
+			if origin == allowed {
+				return true
+			}
+		}
+
+		log.Printf("Rejected connection from origin: %s", origin)
+		return false
+	}
 }
 
 func main() {
-	// Ensure logs directory exists
+	config, err := LoadConfig(defaultConfigFile)
+	if err != nil {
+		log.Fatalf("Failed to load config: %v", err)
+	}
+
+	if err := config.Validate(); err != nil {
+		log.Fatalf("%v", err)
+	}
+
 	if err := os.MkdirAll("../logs", 0755); err != nil {
 		log.Fatalf("Failed to create logs directory: %v", err)
 	}
 
-	// Create chat state with message logging
-	state, err := chat.NewChatState(logFile)
+	state, err := chat.NewChatState(config.Logging.MessageLogFile)
 	if err != nil {
 		log.Fatalf("Failed to create chat state: %v", err)
 	}
 	defer state.Close()
 	log.Println("Chat state initialized")
 
-	// Load TLS certificate
-	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+	cert, err := tls.LoadX509KeyPair(config.TLS.CertFile, config.TLS.KeyFile)
 	if err != nil {
 		log.Fatalf("Failed to load TLS certificate: %v", err)
 	}
@@ -59,28 +71,29 @@ func main() {
 		NextProtos:   []string{"h2", "http/1.1"},
 	}
 
-	// TLS config for HTTP/3
+	// TLS config for HTTP/3 with session ticket caching for 0-RTT
 	tlsConfigH3 := &tls.Config{
-		Certificates: []tls.Certificate{cert},
-		NextProtos:   []string{"h3"},
+		Certificates:           []tls.Certificate{cert},
+		NextProtos:             []string{"h3"},
+		SessionTicketsDisabled: false, // Enable session tickets for 0-RTT
+		ClientSessionCache:     tls.NewLRUClientSessionCache(128),
 	}
 
-	// Create HTTP/3 server with WebTransport support
 	quicConfig := &quic.Config{
 		EnableDatagrams: true,
-		MaxIdleTimeout:  60 * time.Second,
+		MaxIdleTimeout:  config.Timeouts.MaxIdleTimeout,
+		Allow0RTT:       true,
 	}
 
-	// Create WebTransport server
+	originChecker := checkOrigin(config.Security.AllowedOrigins)
+
 	wtServer := &webtransport.Server{
 		H3: http3.Server{
-			Addr:       h3Addr,
+			Addr:       config.Server.H3Addr,
 			TLSConfig:  tlsConfigH3,
 			QUICConfig: quicConfig,
 		},
-		CheckOrigin: func(r *http.Request) bool {
-			return true // Allow all origins for POC
-		},
+		CheckOrigin: originChecker,
 	}
 
 	// Create mux for HTTP handlers
@@ -102,8 +115,7 @@ func main() {
 	// Favicon handler
 	mux.HandleFunc("/favicon.ico", handlers.FaviconHandler())
 
-	// WebSocket handler (works on both HTTP/2 and HTTP/3)
-	mux.HandleFunc("/ws", handlers.WebSocketHandler(state))
+	mux.HandleFunc("/ws", handlers.WebSocketHandler(state, originChecker))
 
 	// WebTransport handler (HTTP/3 only)
 	// WebTransport uses CONNECT method and should NOT have compression middleware
@@ -136,34 +148,29 @@ func main() {
 	// Set handler for HTTP/3 server
 	wtServer.H3.Handler = handlerWithMiddleware
 
-	// Create HTTP/2 server
 	h2Server := &http.Server{
-		Addr:      h2Addr,
+		Addr:      config.Server.H2Addr,
 		TLSConfig: tlsConfigH2,
 		Handler:   handlerWithMiddleware,
 	}
 
-	// Start both servers
-	log.Printf("Starting HTTP/2 server (TCP) on https://chat.local%s", h2Addr)
-	log.Printf("Starting HTTP/3 server (UDP) on https://chat.local%s", h3Addr)
-	log.Printf("WebSocket available at wss://chat.local%s/ws", h2Addr)
-	log.Printf("WebTransport available at https://chat.local%s/chat (HTTP/3 only)", h3Addr)
+	log.Printf("Starting HTTP/2 server (TCP) on https://chat.local%s", config.Server.H2Addr)
+	log.Printf("Starting HTTP/3 server (UDP) on https://chat.local%s", config.Server.H3Addr)
+	log.Printf("WebSocket available at wss://chat.local%s/ws", config.Server.H2Addr)
+	log.Printf("WebTransport available at https://chat.local%s/chat (HTTP/3 only)", config.Server.H3Addr)
 	log.Println("Add '127.0.0.1 chat.local' to /etc/hosts if needed")
 	log.Println("Alt-Svc header will advertise HTTP/3 to browsers")
 
 	serverErr := make(chan error, 2)
 
-	// Start HTTP/2 server
 	go func() {
 		log.Println("HTTP/2 server starting...")
-		serverErr <- h2Server.ListenAndServeTLS(certFile, keyFile)
+		serverErr <- h2Server.ListenAndServeTLS(config.TLS.CertFile, config.TLS.KeyFile)
 	}()
 
-	// Start HTTP/3 server (UDP - will work on same port as HTTP/2 TCP)
-	// Use the WebTransport server's own ListenAndServeTLS method
 	go func() {
 		log.Println("HTTP/3 server starting...")
-		serverErr <- wtServer.ListenAndServeTLS(certFile, keyFile)
+		serverErr <- wtServer.ListenAndServeTLS(config.TLS.CertFile, config.TLS.KeyFile)
 	}()
 
 	// Wait for interrupt signal
@@ -175,6 +182,18 @@ func main() {
 		log.Fatalf("Server error: %v", err)
 	case <-sigChan:
 		log.Println("Shutting down servers...")
+
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), config.Timeouts.ShutdownTimeout)
+		defer cancel()
+
+		if err := h2Server.Shutdown(shutdownCtx); err != nil {
+			log.Printf("HTTP/2 server shutdown error: %v", err)
+		}
+
+		if err := wtServer.Close(); err != nil {
+			log.Printf("HTTP/3 server shutdown error: %v", err)
+		}
+
 		log.Println("Servers stopped")
 	}
 }

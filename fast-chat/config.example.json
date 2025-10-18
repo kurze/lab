@@ -1,0 +1,32 @@
+{
+  "server": {
+    "h2_addr": ":8443",
+    "h3_addr": ":8443"
+  },
+  "tls": {
+    "cert_file": "../certs/cert.pem",
+    "key_file": "../certs/key.pem"
+  },
+  "security": {
+    "allowed_origins": [
+      "https://chat.local:8443"
+    ]
+  },
+  "logging": {
+    "message_log_file": "../logs/messages.jsonl"
+  },
+  "timeouts": {
+    "max_idle_timeout": 60000000000,
+    "read_deadline": 60000000000,
+    "write_deadline": 10000000000,
+    "ping_interval": 30000000000,
+    "shutdown_timeout": 10000000000
+  },
+  "limits": {
+    "max_messages": 1000,
+    "send_channel_buffer": 256,
+    "log_channel_buffer": 100,
+    "max_history_take": 100,
+    "max_history_skip": 10000
+  }
+}

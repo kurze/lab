@@ -18,11 +18,11 @@ const (
 // Connection represents a client connection
 type Connection struct {
 	ID        uuid.UUID
-	nickname  atomic.Value  // stores string
+	nickname  atomic.Value // stores string
 	Transport TransportType
-	lastSeen  atomic.Int64  // Unix nano timestamp
-	SendChan  chan string   // Channel for sending messages to this connection
-	closed    atomic.Bool   // Track if connection is already closed
+	lastSeen  atomic.Int64 // Unix nano timestamp
+	SendChan  chan string  // Channel for sending messages to this connection
+	closed    atomic.Bool  // Track if connection is already closed
 }
 
 // NewConnection creates a new connection
@@ -61,11 +61,19 @@ func (c *Connection) GetLastSeen() time.Time {
 }
 
 // Send sends a message to this connection (non-blocking)
-func (c *Connection) Send(msg string) {
+// Returns false if the connection is closed or buffer is full
+func (c *Connection) Send(msg string) bool {
+	// Don't try to send to closed connections
+	if c.IsClosed() {
+		return false
+	}
+
 	select {
 	case c.SendChan <- msg:
+		return true
 	default:
 		// Drop message if buffer is full (slow client)
+		return false
 	}
 }
 

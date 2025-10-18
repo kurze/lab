@@ -14,12 +14,11 @@ const (
 
 // ChatState holds the global chat state
 type ChatState struct {
-	messages     []*Message
+	messages     *RingBuffer // Lock-free ring buffer for messages
 	connections  map[uuid.UUID]*Connection
 	nicknamePool *NicknamePool
 	logger       *MessageLogger
 	nextID       atomic.Int64
-	messagesMu   sync.RWMutex // Protects messages slice
 	connsMu      sync.RWMutex // Protects connections map
 }
 
@@ -32,7 +31,7 @@ func NewChatState(logFile string) (*ChatState, error) {
 	}
 
 	state := &ChatState{
-		messages:     make([]*Message, 0, MaxMessages),
+		messages:     NewRingBuffer(MaxMessages),
 		connections:  make(map[uuid.UUID]*Connection),
 		nicknamePool: NewNicknamePool(),
 		logger:       logger,
@@ -53,21 +52,23 @@ func NewChatState(logFile string) (*ChatState, error) {
 		log.Printf("Loaded %d messages from log file", totalLoaded)
 	}
 
-	// Populate circular buffer with last MaxMessages
+	// Populate ring buffer with last MaxMessages
 	if len(loadedMessages) > 0 {
 		start := 0
 		if len(loadedMessages) > MaxMessages {
 			start = len(loadedMessages) - MaxMessages
 			log.Printf("Keeping last %d messages in memory (discarding %d older messages)", MaxMessages, totalLoaded-MaxMessages)
 		}
-		state.messages = loadedMessages[start:]
+
+		// Push messages into ring buffer
+		for _, msg := range loadedMessages[start:] {
+			state.messages.Push(msg)
+		}
 
 		// Update nextID to continue from last message
-		if len(state.messages) > 0 {
-			lastID := state.messages[len(state.messages)-1].ID
-			state.nextID.Store(lastID)
-			log.Printf("Resuming message IDs from %d", lastID)
-		}
+		lastMsg := loadedMessages[len(loadedMessages)-1]
+		state.nextID.Store(lastMsg.ID)
+		log.Printf("Resuming message IDs from %d", lastMsg.ID)
 	}
 
 	return state, nil
@@ -81,20 +82,13 @@ func (s *ChatState) Close() error {
 	return nil
 }
 
-// AddMessage adds a message to the circular buffer
+// AddMessage adds a message to the ring buffer (lock-free!)
 func (s *ChatState) AddMessage(nickname, text string) *Message {
 	id := s.nextID.Add(1)
 	msg := NewMessage(id, nickname, text)
 
-	s.messagesMu.Lock()
-	defer s.messagesMu.Unlock()
-
-	// Add message to circular buffer
-	if len(s.messages) >= MaxMessages {
-		// Remove oldest message
-		s.messages = s.messages[1:]
-	}
-	s.messages = append(s.messages, msg)
+	// Add message to lock-free ring buffer (no lock needed!)
+	s.messages.Push(msg)
 
 	// Log message asynchronously
 	if s.logger != nil {
@@ -105,49 +99,16 @@ func (s *ChatState) AddMessage(nickname, text string) *Message {
 }
 
 // GetLastN returns the last N messages (for initial page load)
+// Lock-free read from ring buffer
 func (s *ChatState) GetLastN(n int) []*Message {
-	s.messagesMu.RLock()
-	defer s.messagesMu.RUnlock()
-
-	if len(s.messages) == 0 {
-		return nil
-	}
-
-	if n > len(s.messages) {
-		n = len(s.messages)
-	}
-
-	// Get last n messages
-	start := len(s.messages) - n
-	result := make([]*Message, n)
-	copy(result, s.messages[start:])
-	return result
+	return s.messages.GetLast(n)
 }
 
 // GetHistory returns messages for history requests
 // skip = how many to skip from the end, take = how many to return
+// Lock-free read from ring buffer
 func (s *ChatState) GetHistory(skip, take int) []*Message {
-	s.messagesMu.RLock()
-	defer s.messagesMu.RUnlock()
-
-	if len(s.messages) == 0 {
-		return nil
-	}
-
-	// Calculate range
-	end := len(s.messages) - skip
-	if end <= 0 {
-		return nil
-	}
-
-	start := end - take
-	if start < 0 {
-		start = 0
-	}
-
-	result := make([]*Message, end-start)
-	copy(result, s.messages[start:end])
-	return result
+	return s.messages.GetHistory(skip, take)
 }
 
 // AddConnection adds a new connection
@@ -204,35 +165,39 @@ func (s *ChatState) ConnectionCount() int {
 	return len(s.connections)
 }
 
-// Broadcast sends a message to all connections
+// Broadcast sends a message to all active connections
 func (s *ChatState) Broadcast(msg string) {
 	// Minimize lock hold time by copying connection pointers
 	s.connsMu.RLock()
 	conns := make([]*Connection, 0, len(s.connections))
 	for _, conn := range s.connections {
-		conns = append(conns, conn)
-	}
-	s.connsMu.RUnlock()
-
-	// Send to all connections without holding the lock
-	for _, conn := range conns {
-		conn.Send(msg)
-	}
-}
-
-// BroadcastExcept sends a message to all connections except one
-func (s *ChatState) BroadcastExcept(msg string, exceptID uuid.UUID) {
-	// Minimize lock hold time by copying connection pointers
-	s.connsMu.RLock()
-	conns := make([]*Connection, 0, len(s.connections))
-	for id, conn := range s.connections {
-		if id != exceptID {
+		// Only include connections that aren't closed
+		if !conn.IsClosed() {
 			conns = append(conns, conn)
 		}
 	}
 	s.connsMu.RUnlock()
 
-	// Send to all connections without holding the lock
+	// Send to all active connections without holding the lock
+	for _, conn := range conns {
+		conn.Send(msg)
+	}
+}
+
+// BroadcastExcept sends a message to all active connections except one
+func (s *ChatState) BroadcastExcept(msg string, exceptID uuid.UUID) {
+	// Minimize lock hold time by copying connection pointers
+	s.connsMu.RLock()
+	conns := make([]*Connection, 0, len(s.connections))
+	for id, conn := range s.connections {
+		// Only include connections that aren't closed and aren't the exception
+		if id != exceptID && !conn.IsClosed() {
+			conns = append(conns, conn)
+		}
+	}
+	s.connsMu.RUnlock()
+
+	// Send to all active connections without holding the lock
 	for _, conn := range conns {
 		conn.Send(msg)
 	}

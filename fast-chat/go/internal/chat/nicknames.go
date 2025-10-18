@@ -90,14 +90,15 @@ const (
 	refillBatchSize = 50  // Generate this many nicknames per refill
 )
 
-// NicknamePool manages a pool of available nicknames
 type NicknamePool struct {
 	available     []string
 	used          map[string]bool
 	mu            sync.Mutex
 	rng           *rand.Rand
-	availableSize atomic.Int32 // Cache of len(available) for lock-free reads
-	usedSize      atomic.Int32 // Cache of len(used) for lock-free reads
+	availableSize atomic.Int32
+	usedSize      atomic.Int32
+	shuffledPool  []string
+	shuffleIndex  int
 }
 
 // NewNicknamePool creates a new nickname pool
@@ -147,19 +148,27 @@ func (p *NicknamePool) contains(nickname string) bool {
 	return false
 }
 
-// Allocate gets the next available nickname
 func (p *NicknamePool) Allocate() string {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	// Auto-refill if pool is running low
+	totalCombinations := len(adjectives) * len(names)
+	usedCount := len(p.used)
+	collisionProbability := float64(usedCount) / float64(totalCombinations)
+
+	if collisionProbability > 0.5 && len(p.shuffledPool) == 0 {
+		p.initializeShuffledPool()
+	}
+
+	if len(p.shuffledPool) > 0 {
+		return p.allocateFromShuffledPool()
+	}
+
 	if len(p.available) < refillThreshold {
 		p.generateNicknames(refillBatchSize)
 	}
 
-	// If still empty (very rare, all combinations exhausted)
 	if len(p.available) == 0 {
-		// Emergency fallback: generate until we find one not in blacklist
 		for {
 			adj := adjectives[p.rng.Intn(len(adjectives))]
 			name := names[p.rng.Intn(len(names))]
@@ -172,13 +181,44 @@ func (p *NicknamePool) Allocate() string {
 		}
 	}
 
-	// Pop from the end for O(1) performance
 	nickname := p.available[len(p.available)-1]
 	p.available = p.available[:len(p.available)-1]
 	p.used[nickname] = true
 
-	// Update atomic counters
 	p.availableSize.Add(-1)
+	p.usedSize.Add(1)
+
+	return nickname
+}
+
+func (p *NicknamePool) initializeShuffledPool() {
+	p.shuffledPool = make([]string, 0, len(adjectives)*len(names))
+	for _, adj := range adjectives {
+		for _, name := range names {
+			nickname := adj + "_" + name
+			if !p.used[nickname] {
+				p.shuffledPool = append(p.shuffledPool, nickname)
+			}
+		}
+	}
+
+	for i := len(p.shuffledPool) - 1; i > 0; i-- {
+		j := p.rng.Intn(i + 1)
+		p.shuffledPool[i], p.shuffledPool[j] = p.shuffledPool[j], p.shuffledPool[i]
+	}
+	p.shuffleIndex = 0
+}
+
+func (p *NicknamePool) allocateFromShuffledPool() string {
+	if p.shuffleIndex >= len(p.shuffledPool) {
+		p.shuffledPool = nil
+		p.shuffleIndex = 0
+		return p.Allocate()
+	}
+
+	nickname := p.shuffledPool[p.shuffleIndex]
+	p.shuffleIndex++
+	p.used[nickname] = true
 	p.usedSize.Add(1)
 
 	return nickname

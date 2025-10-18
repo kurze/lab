@@ -2,6 +2,7 @@ package chat
 
 import (
 	"encoding/json"
+	"log"
 	"os"
 	"sync"
 )
@@ -54,18 +55,17 @@ func (l *MessageLogger) writeLoop() {
 	for {
 		select {
 		case msg := <-l.logChan:
-			// Write message as JSON line
 			if err := encoder.Encode(msg); err != nil {
-				// Log error but continue (don't crash the app)
-				// In production, you might want proper error handling
+				log.Printf("Failed to write message to log file: %v", err)
 			}
 
 		case <-l.closeChan:
-			// Drain remaining messages before closing
 			for {
 				select {
 				case msg := <-l.logChan:
-					encoder.Encode(msg)
+					if err := encoder.Encode(msg); err != nil {
+						log.Printf("Failed to write message during shutdown: %v", err)
+					}
 				default:
 					return
 				}
