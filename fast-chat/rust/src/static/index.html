@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Fast Chat</title>
+
+  <!-- Resource hints for faster connection -->
+  <link rel="dns-prefetch" href="//chat.local">
+  <link rel="preconnect" href="wss://chat.local:8443">
+
+  <!-- Pre-connect WebTransport/WebSocket early -->
+  <script>
+    if ('WebTransport' in window) {
+      const earlyConn = new WebTransport(`https://${location.host}/chat`);
+      earlyConn.ready.then(() => {
+        window.__earlyWT = earlyConn;
+      }).catch(() => {});
+    }
+  </script>
+
+  <!-- External resources (HTTP/2 pushed) -->
+  <link rel="stylesheet" href="/chat.css">
+  <script src="/chat.js" async></script>
+</head>
+<body>
+  <div id="messages">{{MESSAGES}}</div>
+
+  <div id="input-area">
+    <div id="status">
+      <span id="nickname">{{NICKNAME}}</span> •
+      <span id="user-count">1 user online</span> •
+      <span id="connection-status">Connecting...</span>
+    </div>
+    <input id="msg-input" placeholder="Type a message..." autofocus>
+    <button id="send-btn">Send</button>
+  </div>
+</body>
+</html>
