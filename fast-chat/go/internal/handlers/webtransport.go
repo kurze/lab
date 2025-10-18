@@ -86,7 +86,6 @@ func wtReader(ctx context.Context, session *webtransport.Session, conn *chat.Con
 
 		conn.UpdateLastSeen()
 		msg := string(data)
-		log.Printf("WebTransport received from %s: %s", conn.ID, msg[:min(50, len(msg))])
 		handleClientMessage(msg, conn, state)
 	}
 }
@@ -100,11 +99,8 @@ func wtWriter(ctx context.Context, session *webtransport.Session, conn *chat.Con
 		select {
 		case message, ok := <-conn.SendChan:
 			if !ok {
-				log.Printf("WebTransport send channel closed for %s", conn.ID)
 				return
 			}
-
-			log.Printf("WebTransport sending to %s: %s", conn.ID, message[:min(50, len(message))])
 
 			isCritical := len(message) > 0 && (message[0] == '{' ||
 				(len(message) > 4 && (message[:4] == "JOIN" || message[:4] == "HIST")))
@@ -131,7 +127,6 @@ func wtWriter(ctx context.Context, session *webtransport.Session, conn *chat.Con
 			}
 
 		case <-ctx.Done():
-			log.Printf("WebTransport writer context done for %s", conn.ID)
 			return
 		}
 	}
