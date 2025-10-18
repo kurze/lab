@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"bufio"
 	"encoding/json"
 	"log"
 	"os"
@@ -89,19 +90,23 @@ func LoadMessages(filename string) ([]*Message, error) {
 	file, err := os.Open(filename)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil // File doesn't exist yet, return empty
+			return nil, nil
 		}
 		return nil, err
 	}
 	defer file.Close()
 
 	var messages []*Message
-	decoder := json.NewDecoder(file)
+	scanner := bufio.NewScanner(file)
 
-	for decoder.More() {
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "" {
+			continue
+		}
+
 		var msg Message
-		if err := decoder.Decode(&msg); err != nil {
-			// Skip malformed lines
+		if err := json.Unmarshal([]byte(line), &msg); err != nil {
 			continue
 		}
 		messages = append(messages, &msg)
