@@ -1,3 +1,27 @@
-certs/*
-go/bin/*
+# Build artifacts
+bin/
+go/cmd/*/server
+go/cmd/*/benchmark
+rust/bin/
+rust/target/
+target/
 
+# Test artifacts
+*.test
+go/coverage.out
+
+# Logs
+logs/*.jsonl
+
+# Certificates
+certs/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Backup files
+*.bak
