@@ -36,7 +36,7 @@ func createEchoMessage(msg *chat.Message, clientID string) string {
 	return string(bytes)
 }
 
-func WebSocketHandler(state *chat.ChatState, checkOrigin func(*http.Request) bool) http.HandlerFunc {
+func WebSocketHandler(state *chat.ChatState, checkOrigin func(*http.Request) bool, quiet bool) http.HandlerFunc {
 	upgrader := websocket.Upgrader{
 		ReadBufferSize:  1024,
 		WriteBufferSize: 1024,
@@ -53,18 +53,18 @@ func WebSocketHandler(state *chat.ChatState, checkOrigin func(*http.Request) boo
 		conn := chat.NewConnection(chat.TransportWebSocket)
 		state.AddConnection(conn)
 
-		log.Printf("New WebSocket connection: %s", conn.ID)
+		if !quiet {
+			log.Printf("New WebSocket connection: %s", conn.ID)
+		}
 
-		// Start writer goroutine
 		go wsWriter(ws, conn)
 
-		// Handle incoming messages
-		wsReader(ws, conn, state)
+		wsReader(ws, conn, state, quiet)
 	}
 }
 
 // wsReader reads messages from the WebSocket
-func wsReader(ws *websocket.Conn, conn *chat.Connection, state *chat.ChatState) {
+func wsReader(ws *websocket.Conn, conn *chat.Connection, state *chat.ChatState, quiet bool) {
 	defer func() {
 		// Remove connection and get nickname if this is the first cleanup
 		nickname := state.RemoveConnection(conn.ID)
@@ -80,9 +80,13 @@ func wsReader(ws *websocket.Conn, conn *chat.Connection, state *chat.ChatState) 
 			count := state.ConnectionCount()
 			state.Broadcast(chat.UserCountJSON(count))
 
-			log.Printf("WebSocket user %s disconnected (%s)", nickname, conn.ID)
+			if !quiet {
+				log.Printf("WebSocket user %s disconnected (%s)", nickname, conn.ID)
+			}
 		} else {
-			log.Printf("WebSocket connection already cleaned up: %s", conn.ID)
+			if !quiet {
+				log.Printf("WebSocket connection already cleaned up: %s", conn.ID)
+			}
 		}
 	}()
 
@@ -102,7 +106,7 @@ func wsReader(ws *websocket.Conn, conn *chat.Connection, state *chat.ChatState) 
 		}
 
 		conn.UpdateLastSeen()
-		handleClientMessage(string(message), conn, state)
+		handleClientMessage(string(message), conn, state, quiet)
 	}
 }
 
@@ -137,7 +141,7 @@ func wsWriter(ws *websocket.Conn, conn *chat.Connection) {
 }
 
 // handleClientMessage processes incoming client messages
-func handleClientMessage(data string, conn *chat.Connection, state *chat.ChatState) {
+func handleClientMessage(data string, conn *chat.Connection, state *chat.ChatState, quiet bool) {
 	parts := strings.Split(data, "|")
 	if len(parts) == 0 {
 		return
@@ -161,7 +165,9 @@ func handleClientMessage(data string, conn *chat.Connection, state *chat.ChatSta
 		count := state.ConnectionCount()
 		state.Broadcast(chat.UserCountJSON(count))
 
-		log.Printf("User %s joined (conn: %s)", nickname, conn.ID)
+		if !quiet {
+			log.Printf("User %s joined (conn: %s)", nickname, conn.ID)
+		}
 
 	case "SEND":
 		if len(parts) < 3 {
@@ -185,7 +191,9 @@ func handleClientMessage(data string, conn *chat.Connection, state *chat.ChatSta
 		jsonMsg := msg.ToJSON()
 		state.BroadcastExcept(jsonMsg, conn.ID)
 
-		log.Printf("Message from %s: %s", nickname, text)
+		if !quiet {
+			log.Printf("Message from %s: %s", nickname, text)
+		}
 
 	case "HISTORY":
 		if len(parts) < 2 {

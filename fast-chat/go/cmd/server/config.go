@@ -32,6 +32,7 @@ type SecurityConfig struct {
 type LoggingConfig struct {
 	MessageLogFile   string   `json:"message_log_file"`
 	LogFlushInterval Duration `json:"log_flush_interval"`
+	Quiet            bool     `json:"quiet"`
 }
 
 type TimeoutsConfig struct {
@@ -103,6 +104,7 @@ func DefaultConfig() *Config {
 		Logging: LoggingConfig{
 			MessageLogFile:   "logs/messages.jsonl",
 			LogFlushInterval: Duration(1 * time.Second),
+			Quiet:            false,
 		},
 		Timeouts: TimeoutsConfig{
 			MaxIdleTimeout:  Duration(60 * time.Second),

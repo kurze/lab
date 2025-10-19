@@ -12,6 +12,11 @@ use tower_http::compression::CompressionLayer;
 use tower_http::cors::{Any, CorsLayer};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
+pub struct AppState {
+    pub chat: Arc<chat::ChatState>,
+    pub quiet: bool,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::registry()
@@ -32,7 +37,7 @@ async fn main() -> Result<()> {
         tracing::warn!("Failed to create logs directory: {}", e);
     }
 
-    let state = Arc::new(
+    let chat_state = Arc::new(
         chat::ChatState::new(
             &config.logging.message_log_file,
             config.limits.max_messages,
@@ -42,6 +47,11 @@ async fn main() -> Result<()> {
         .await?,
     );
     tracing::info!("Chat state initialized");
+
+    let app_state = Arc::new(AppState {
+        chat: chat_state,
+        quiet: config.logging.quiet,
+    });
 
     let tls_config = load_tls_config(&config.tls)?;
 
@@ -58,7 +68,7 @@ async fn main() -> Result<()> {
         .route("/ws", get(handlers::websocket_handler))
         .layer(cors)
         .layer(CompressionLayer::new())
-        .with_state(state);
+        .with_state(app_state);
 
     let addr: std::net::SocketAddr = config.server.h2_addr.parse()?;
     

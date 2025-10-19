@@ -11,7 +11,7 @@ import (
 )
 
 // WebTransportHandler creates a WebTransport handler
-func WebTransportHandler(state *chat.ChatState, wtServer *webtransport.Server) http.HandlerFunc {
+func WebTransportHandler(state *chat.ChatState, wtServer *webtransport.Server, quiet bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		session, err := wtServer.Upgrade(w, r)
 		if err != nil {
@@ -20,29 +20,28 @@ func WebTransportHandler(state *chat.ChatState, wtServer *webtransport.Server) h
 			return
 		}
 
-		HandleWebTransportSession(session, state)
+		HandleWebTransportSession(session, state, quiet)
 	}
 }
 
 // HandleWebTransportSession handles a WebTransport session
-func HandleWebTransportSession(session *webtransport.Session, state *chat.ChatState) {
+func HandleWebTransportSession(session *webtransport.Session, state *chat.ChatState, quiet bool) {
 	conn := chat.NewConnection(chat.TransportWebTransport)
 	state.AddConnection(conn)
 
-	log.Printf("New WebTransport connection: %s", conn.ID)
+	if !quiet {
+		log.Printf("New WebTransport connection: %s", conn.ID)
+	}
 
-	// Use session context to detect when client disconnects
 	ctx := session.Context()
 
-	// Start writer goroutine for datagrams
 	go wtWriter(ctx, session, conn)
 
-	// Handle incoming datagrams (blocks until connection closes)
-	wtReader(ctx, session, conn, state)
+	wtReader(ctx, session, conn, state, quiet)
 }
 
 // wtReader reads datagrams from WebTransport
-func wtReader(ctx context.Context, session *webtransport.Session, conn *chat.Connection, state *chat.ChatState) {
+func wtReader(ctx context.Context, session *webtransport.Session, conn *chat.Connection, state *chat.ChatState, quiet bool) {
 	defer func() {
 		// Remove connection and get nickname if this is the first cleanup
 		nickname := state.RemoveConnection(conn.ID)
@@ -57,9 +56,13 @@ func wtReader(ctx context.Context, session *webtransport.Session, conn *chat.Con
 			count := state.ConnectionCount()
 			state.Broadcast(chat.UserCountJSON(count))
 
-			log.Printf("WebTransport user %s disconnected (%s)", nickname, conn.ID)
+			if !quiet {
+				log.Printf("WebTransport user %s disconnected (%s)", nickname, conn.ID)
+			}
 		} else {
-			log.Printf("WebTransport connection already cleaned up: %s", conn.ID)
+			if !quiet {
+				log.Printf("WebTransport connection already cleaned up: %s", conn.ID)
+			}
 		}
 	}()
 
@@ -86,7 +89,7 @@ func wtReader(ctx context.Context, session *webtransport.Session, conn *chat.Con
 
 		conn.UpdateLastSeen()
 		msg := string(data)
-		handleClientMessage(msg, conn, state)
+		handleClientMessage(msg, conn, state, quiet)
 	}
 }
 

@@ -115,7 +115,7 @@ func main() {
 	// Favicon handler
 	mux.HandleFunc("/favicon.ico", handlers.FaviconHandler())
 
-	mux.HandleFunc("/ws", handlers.WebSocketHandler(state, originChecker))
+	mux.HandleFunc("/ws", handlers.WebSocketHandler(state, originChecker, config.Logging.Quiet))
 
 	// WebTransport handler (HTTP/3 only)
 	// WebTransport uses CONNECT method and should NOT have compression middleware
@@ -126,7 +126,7 @@ func main() {
 			http.Error(w, "WebTransport upgrade failed", http.StatusInternalServerError)
 			return
 		}
-		handlers.HandleWebTransportSession(session, state)
+		handlers.HandleWebTransportSession(session, state, config.Logging.Quiet)
 	})
 
 	// Wrap with Alt-Svc middleware (but NOT compression for WebTransport)

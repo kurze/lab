@@ -11,21 +11,24 @@ use std::sync::Arc;
 
 pub async fn websocket_handler(
     ws: WebSocketUpgrade,
-    State(state): State<Arc<ChatState>>,
+    State(app_state): State<Arc<crate::AppState>>,
 ) -> Response {
-    ws.on_upgrade(|socket| handle_socket(socket, state))
+    ws.on_upgrade(|socket| handle_socket(socket, app_state))
 }
 
-async fn handle_socket(socket: WebSocket, state: Arc<ChatState>) {
+async fn handle_socket(socket: WebSocket, app_state: Arc<crate::AppState>) {
     let (conn, mut receiver) = Connection::new(TransportType::WebSocket, 256);
-    state.add_connection(conn.clone());
+    app_state.chat.add_connection(conn.clone());
 
-    tracing::info!("New WebSocket connection: {}", conn.id);
+    if !app_state.quiet {
+        tracing::info!("New WebSocket connection: {}", conn.id);
+    }
 
     let (mut ws_sender, mut ws_receiver) = socket.split();
 
     let conn_id = conn.id;
-    let state_clone = state.clone();
+    let state_clone = app_state.chat.clone();
+    let quiet = app_state.quiet;
     let send_task = tokio::spawn(async move {
         while let Some(msg) = receiver.recv().await {
             if ws_sender.send(Message::Text((*msg).clone())).await.is_err() {
@@ -37,7 +40,7 @@ async fn handle_socket(socket: WebSocket, state: Arc<ChatState>) {
     while let Some(Ok(msg)) = ws_receiver.next().await {
         if let Message::Text(text) = msg {
             conn.update_last_seen();
-            handle_client_message(&text, &conn, &state).await;
+            handle_client_message(&text, &conn, &app_state.chat, quiet).await;
         } else if let Message::Close(_) = msg {
             break;
         }
@@ -52,13 +55,17 @@ async fn handle_socket(socket: WebSocket, state: Arc<ChatState>) {
         let count = state_clone.connection_count();
         state_clone.broadcast(user_count_json(count));
 
-        tracing::info!("WebSocket user {} disconnected ({})", nickname, conn_id);
+        if !quiet {
+            tracing::info!("WebSocket user {} disconnected ({})", nickname, conn_id);
+        }
     } else {
-        tracing::info!("WebSocket connection already cleaned up: {}", conn_id);
+        if !quiet {
+            tracing::info!("WebSocket connection already cleaned up: {}", conn_id);
+        }
     }
 }
 
-async fn handle_client_message(data: &str, conn: &Connection, state: &Arc<ChatState>) {
+async fn handle_client_message(data: &str, conn: &Connection, state: &Arc<ChatState>, quiet: bool) {
     let parts: Vec<&str> = data.split('|').collect();
     if parts.is_empty() {
         return;
@@ -80,7 +87,9 @@ async fn handle_client_message(data: &str, conn: &Connection, state: &Arc<ChatSt
             let count = state.connection_count();
             state.broadcast(user_count_json(count));
 
-            tracing::info!("User {} joined (conn: {})", nickname, conn.id);
+            if !quiet {
+                tracing::info!("User {} joined (conn: {})", nickname, conn.id);
+            }
         }
 
         "SEND" => {
@@ -105,7 +114,9 @@ async fn handle_client_message(data: &str, conn: &Connection, state: &Arc<ChatSt
             let json_msg = msg.to_json();
             state.broadcast_except(json_msg, conn.id);
 
-            tracing::info!("Message from {}: {}", nickname, text);
+            if !quiet {
+                tracing::info!("Message from {}: {}", nickname, text);
+            }
         }
 
         "HISTORY" => {

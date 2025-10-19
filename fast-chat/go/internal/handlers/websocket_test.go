@@ -17,7 +17,7 @@ func TestWebSocketHandlerUpgrade(t *testing.T) {
 	state, cleanup := createTestState(t)
 	defer cleanup()
 
-	server := httptest.NewServer(WebSocketHandler(state, allowAllOrigins))
+	server := httptest.NewServer(WebSocketHandler(state, allowAllOrigins, false))
 	defer server.Close()
 
 	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
@@ -38,7 +38,7 @@ func TestWebSocketHandlerJoinMessage(t *testing.T) {
 	state, cleanup := createTestState(t)
 	defer cleanup()
 
-	server := httptest.NewServer(WebSocketHandler(state, allowAllOrigins))
+	server := httptest.NewServer(WebSocketHandler(state, allowAllOrigins, false))
 	defer server.Close()
 
 	ws := connectWebSocket(t, server.URL)
@@ -77,7 +77,7 @@ func TestWebSocketHandlerSendMessage(t *testing.T) {
 	state, cleanup := createTestState(t)
 	defer cleanup()
 
-	server := httptest.NewServer(WebSocketHandler(state, allowAllOrigins))
+	server := httptest.NewServer(WebSocketHandler(state, allowAllOrigins, false))
 	defer server.Close()
 
 	ws1 := connectWebSocket(t, server.URL)
@@ -115,7 +115,7 @@ func TestWebSocketHandlerClientIDEcho(t *testing.T) {
 	state, cleanup := createTestState(t)
 	defer cleanup()
 
-	server := httptest.NewServer(WebSocketHandler(state, allowAllOrigins))
+	server := httptest.NewServer(WebSocketHandler(state, allowAllOrigins, false))
 	defer server.Close()
 
 	ws := connectWebSocket(t, server.URL)
@@ -165,7 +165,7 @@ func TestWebSocketHandlerHistoryRequest(t *testing.T) {
 		state.AddMessage("user", "message")
 	}
 
-	server := httptest.NewServer(WebSocketHandler(state, allowAllOrigins))
+	server := httptest.NewServer(WebSocketHandler(state, allowAllOrigins, false))
 	defer server.Close()
 
 	ws := connectWebSocket(t, server.URL)
@@ -214,7 +214,7 @@ func TestWebSocketHandlerHistoryLimits(t *testing.T) {
 		state.AddMessage("user", "message")
 	}
 
-	server := httptest.NewServer(WebSocketHandler(state, allowAllOrigins))
+	server := httptest.NewServer(WebSocketHandler(state, allowAllOrigins, false))
 	defer server.Close()
 
 	ws := connectWebSocket(t, server.URL)
@@ -240,7 +240,7 @@ func TestWebSocketHandlerInvalidCommands(t *testing.T) {
 	state, cleanup := createTestState(t)
 	defer cleanup()
 
-	server := httptest.NewServer(WebSocketHandler(state, allowAllOrigins))
+	server := httptest.NewServer(WebSocketHandler(state, allowAllOrigins, false))
 	defer server.Close()
 
 	ws := connectWebSocket(t, server.URL)
@@ -272,7 +272,7 @@ func TestWebSocketHandlerOriginCheck(t *testing.T) {
 		return origin == "https://allowed.com"
 	}
 
-	server := httptest.NewServer(WebSocketHandler(state, checkOrigin))
+	server := httptest.NewServer(WebSocketHandler(state, checkOrigin, false))
 	defer server.Close()
 
 	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
@@ -293,7 +293,7 @@ func TestWebSocketHandlerDisconnect(t *testing.T) {
 	state, cleanup := createTestState(t)
 	defer cleanup()
 
-	server := httptest.NewServer(WebSocketHandler(state, allowAllOrigins))
+	server := httptest.NewServer(WebSocketHandler(state, allowAllOrigins, false))
 	defer server.Close()
 
 	ws := connectWebSocket(t, server.URL)
