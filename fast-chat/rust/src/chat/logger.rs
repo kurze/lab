@@ -11,7 +11,7 @@ pub struct MessageLogger {
 }
 
 impl MessageLogger {
-    pub async fn new(filename: &str, buffer_size: usize) -> Result<Self> {
+    pub async fn new(filename: &str, buffer_size: usize, flush_interval: Duration) -> Result<Self> {
         let file = OpenOptions::new()
             .create(true)
             .write(true)
@@ -21,7 +21,7 @@ impl MessageLogger {
 
         let (sender, receiver) = mpsc::channel(buffer_size);
 
-        tokio::spawn(write_loop(file, receiver));
+        tokio::spawn(write_loop(file, receiver, flush_interval));
 
         Ok(Self { sender })
     }
@@ -31,10 +31,9 @@ impl MessageLogger {
     }
 }
 
-async fn write_loop(mut file: File, mut receiver: mpsc::Receiver<Message>) {
-    let mut flush_interval = interval(Duration::from_millis(100));
-    let mut pending_count = 0usize;
-    const FLUSH_THRESHOLD: usize = 1000;
+async fn write_loop(mut file: File, mut receiver: mpsc::Receiver<Message>, flush_interval_duration: Duration) {
+    let mut flush_timer = interval(flush_interval_duration);
+    flush_timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     
     loop {
         tokio::select! {
@@ -44,12 +43,6 @@ async fn write_loop(mut file: File, mut receiver: mpsc::Receiver<Message>) {
                         if let Ok(json) = serde_json::to_string(&msg) {
                             let _ = file.write_all(json.as_bytes()).await;
                             let _ = file.write_all(b"\n").await;
-                            pending_count += 1;
-                            
-                            if pending_count >= FLUSH_THRESHOLD {
-                                let _ = file.flush().await;
-                                pending_count = 0;
-                            }
                         }
                     }
                     None => {
@@ -58,11 +51,8 @@ async fn write_loop(mut file: File, mut receiver: mpsc::Receiver<Message>) {
                     }
                 }
             }
-            _ = flush_interval.tick() => {
-                if pending_count > 0 {
-                    let _ = file.flush().await;
-                    pending_count = 0;
-                }
+            _ = flush_timer.tick() => {
+                let _ = file.flush().await;
             }
         }
     }

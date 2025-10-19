@@ -15,7 +15,7 @@ func TestMessageLoggerWriteAndLoad(t *testing.T) {
 	defer os.Remove(tmpFile.Name())
 	tmpFile.Close()
 
-	logger, err := NewMessageLogger(tmpFile.Name())
+	logger, err := NewMessageLogger(tmpFile.Name(), time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +108,7 @@ func TestMessageLoggerConcurrentWrites(t *testing.T) {
 	defer os.Remove(tmpFile.Name())
 	tmpFile.Close()
 
-	logger, err := NewMessageLogger(tmpFile.Name())
+	logger, err := NewMessageLogger(tmpFile.Name(), time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +152,7 @@ func TestMessageLoggerBufferFull(t *testing.T) {
 	defer os.Remove(tmpFile.Name())
 	tmpFile.Close()
 
-	logger, err := NewMessageLogger(tmpFile.Name())
+	logger, err := NewMessageLogger(tmpFile.Name(), time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,7 +186,7 @@ func TestMessageLoggerCloseFlushes(t *testing.T) {
 	defer os.Remove(tmpFile.Name())
 	tmpFile.Close()
 
-	logger, err := NewMessageLogger(tmpFile.Name())
+	logger, err := NewMessageLogger(tmpFile.Name(), time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}

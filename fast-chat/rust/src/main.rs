@@ -37,6 +37,7 @@ async fn main() -> Result<()> {
             &config.logging.message_log_file,
             config.limits.max_messages,
             config.limits.log_channel_buffer,
+            config.logging.log_flush_interval,
         )
         .await?,
     );

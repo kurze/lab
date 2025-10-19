@@ -278,7 +278,7 @@ func createTestState(t *testing.T) (*ChatState, func()) {
 	}
 	tmpFile.Close()
 
-	state, err := NewChatState(tmpFile.Name())
+	state, err := NewChatState(tmpFile.Name(), time.Second)
 	if err != nil {
 		os.Remove(tmpFile.Name())
 		t.Fatalf("Failed to create chat state: %v", err)

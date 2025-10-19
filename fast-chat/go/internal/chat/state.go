@@ -4,6 +4,7 @@ import (
 	"log"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -23,9 +24,8 @@ type ChatState struct {
 }
 
 // NewChatState creates a new chat state
-func NewChatState(logFile string) (*ChatState, error) {
-	// Create logger
-	logger, err := NewMessageLogger(logFile)
+func NewChatState(logFile string, flushInterval time.Duration) (*ChatState, error) {
+	logger, err := NewMessageLogger(logFile, flushInterval)
 	if err != nil {
 		return nil, err
 	}

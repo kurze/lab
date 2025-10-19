@@ -53,7 +53,7 @@ func main() {
 		log.Fatalf("Failed to create logs directory: %v", err)
 	}
 
-	state, err := chat.NewChatState(config.Logging.MessageLogFile)
+	state, err := chat.NewChatState(config.Logging.MessageLogFile, config.Logging.LogFlushInterval.ToDuration())
 	if err != nil {
 		log.Fatalf("Failed to create chat state: %v", err)
 	}

@@ -8,6 +8,7 @@ use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 use uuid::Uuid;
 
 pub struct ChatState {
@@ -19,8 +20,8 @@ pub struct ChatState {
 }
 
 impl ChatState {
-    pub async fn new(log_file: &str, max_messages: usize, log_buffer_size: usize) -> Result<Self> {
-        let logger = MessageLogger::new(log_file, log_buffer_size).await?;
+    pub async fn new(log_file: &str, max_messages: usize, log_buffer_size: usize, flush_interval: Duration) -> Result<Self> {
+        let logger = MessageLogger::new(log_file, log_buffer_size, flush_interval).await?;
 
         let loaded_messages = load_messages(log_file).await?;
 

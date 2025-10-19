@@ -6,31 +6,34 @@ import (
 	"log"
 	"os"
 	"sync"
+	"time"
 )
 
 // MessageLogger handles async logging of messages to a file
 type MessageLogger struct {
-	file      *os.File
-	logChan   chan *Message
-	closeChan chan struct{}
-	wg        sync.WaitGroup
-	mu        sync.Mutex
+	file          *os.File
+	writer        *bufio.Writer
+	logChan       chan *Message
+	closeChan     chan struct{}
+	wg            sync.WaitGroup
+	mu            sync.Mutex
+	flushInterval time.Duration
 }
 
-// NewMessageLogger creates a new async message logger
-func NewMessageLogger(filename string) (*MessageLogger, error) {
+func NewMessageLogger(filename string, flushInterval time.Duration) (*MessageLogger, error) {
 	file, err := os.OpenFile(filename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
 		return nil, err
 	}
 
 	logger := &MessageLogger{
-		file:      file,
-		logChan:   make(chan *Message, 100), // Buffer 100 messages
-		closeChan: make(chan struct{}),
+		file:          file,
+		writer:        bufio.NewWriter(file),
+		logChan:       make(chan *Message, 100),
+		closeChan:     make(chan struct{}),
+		flushInterval: flushInterval,
 	}
 
-	// Start background writer
 	logger.wg.Add(1)
 	go logger.writeLoop()
 
@@ -51,13 +54,20 @@ func (l *MessageLogger) Log(msg *Message) {
 // writeLoop processes messages from the queue and writes to file
 func (l *MessageLogger) writeLoop() {
 	defer l.wg.Done()
-	encoder := json.NewEncoder(l.file)
+	encoder := json.NewEncoder(l.writer)
+	ticker := time.NewTicker(l.flushInterval)
+	defer ticker.Stop()
 
 	for {
 		select {
 		case msg := <-l.logChan:
 			if err := encoder.Encode(msg); err != nil {
 				log.Printf("Failed to write message to log file: %v", err)
+			}
+
+		case <-ticker.C:
+			if err := l.writer.Flush(); err != nil {
+				log.Printf("Failed to flush log buffer: %v", err)
 			}
 
 		case <-l.closeChan:
@@ -68,6 +78,7 @@ func (l *MessageLogger) writeLoop() {
 						log.Printf("Failed to write message during shutdown: %v", err)
 					}
 				default:
+					l.writer.Flush()
 					return
 				}
 			}
@@ -82,6 +93,7 @@ func (l *MessageLogger) Close() error {
 
 	close(l.closeChan)
 	l.wg.Wait()
+	l.writer.Flush()
 	return l.file.Close()
 }
 

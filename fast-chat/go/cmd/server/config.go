@@ -30,7 +30,8 @@ type SecurityConfig struct {
 }
 
 type LoggingConfig struct {
-	MessageLogFile string `json:"message_log_file"`
+	MessageLogFile   string   `json:"message_log_file"`
+	LogFlushInterval Duration `json:"log_flush_interval"`
 }
 
 type TimeoutsConfig struct {
@@ -100,7 +101,8 @@ func DefaultConfig() *Config {
 			AllowedOrigins: []string{"https://chat.local:8443"},
 		},
 		Logging: LoggingConfig{
-			MessageLogFile: "logs/messages.jsonl",
+			MessageLogFile:   "logs/messages.jsonl",
+			LogFlushInterval: Duration(1 * time.Second),
 		},
 		Timeouts: TimeoutsConfig{
 			MaxIdleTimeout:  Duration(60 * time.Second),

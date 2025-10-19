@@ -33,6 +33,8 @@ pub struct SecurityConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoggingConfig {
     pub message_log_file: String,
+    #[serde(deserialize_with = "deserialize_duration_nanos")]
+    pub log_flush_interval: Duration,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -125,6 +127,7 @@ impl Default for Config {
             },
             logging: LoggingConfig {
                 message_log_file: "../logs/messages.jsonl".to_string(),
+                log_flush_interval: Duration::from_secs(1),
             },
             timeouts: TimeoutsConfig {
                 max_idle_timeout: Duration::from_secs(60),
