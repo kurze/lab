@@ -1,4 +1,4 @@
-use super::connection::{Connection, TransportType};
+use super::connection::Connection;
 use super::logger::{load_messages, MessageLogger};
 use super::message::Message;
 use super::nicknames::NicknamePool;
@@ -108,6 +108,7 @@ impl ChatState {
         None
     }
 
+    #[allow(dead_code)]
     pub fn get_connection(&self, id: Uuid) -> Option<Connection> {
         self.connections.read().get(&id).cloned()
     }
@@ -148,6 +149,7 @@ impl ChatState {
         self.nickname_pool.write().allocate()
     }
 
+    #[allow(dead_code)]
     pub fn nickname_pool_stats(&self) -> (usize, usize) {
         let pool = self.nickname_pool.read();
         (pool.available(), pool.used())

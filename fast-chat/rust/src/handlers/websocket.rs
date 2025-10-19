@@ -8,7 +8,6 @@ use axum::{
 };
 use futures::{sink::SinkExt, stream::StreamExt};
 use std::sync::Arc;
-use std::time::Duration;
 
 pub async fn websocket_handler(
     ws: WebSocketUpgrade,

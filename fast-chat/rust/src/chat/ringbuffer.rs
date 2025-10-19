@@ -84,11 +84,13 @@ impl RingBuffer {
         result
     }
 
+    #[allow(dead_code)]
     pub fn count(&self) -> usize {
         let _lock = self.mu.lock();
         self.count
     }
 
+    #[allow(dead_code)]
     pub fn capacity(&self) -> usize {
         self.size
     }

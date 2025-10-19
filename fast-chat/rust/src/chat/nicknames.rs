@@ -1,6 +1,5 @@
-use parking_lot::Mutex;
 use rand::Rng;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicI32, Ordering};
 
 const ADJECTIVES: &[&str] = &[
@@ -215,10 +214,12 @@ impl NicknamePool {
         self.used_size.fetch_sub(1, Ordering::Relaxed);
     }
 
+    #[allow(dead_code)]
     pub fn available(&self) -> usize {
         self.available_size.load(Ordering::Relaxed) as usize
     }
 
+    #[allow(dead_code)]
     pub fn used(&self) -> usize {
         self.used_size.load(Ordering::Relaxed) as usize
     }

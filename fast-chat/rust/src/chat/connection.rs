@@ -4,6 +4,7 @@ use tokio::sync::mpsc;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum TransportType {
     WebSocket,
     WebTransport,
@@ -13,6 +14,7 @@ pub enum TransportType {
 pub struct Connection {
     pub id: Uuid,
     nickname: Arc<parking_lot::RwLock<String>>,
+    #[allow(dead_code)]
     pub transport: TransportType,
     last_seen: Arc<AtomicI64>,
     pub send_chan: mpsc::Sender<String>,

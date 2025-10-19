@@ -8,7 +8,6 @@ use axum::{
     Router,
 };
 use std::sync::Arc;
-use tokio::signal;
 use tower_http::compression::CompressionLayer;
 use tower_http::cors::{Any, CorsLayer};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
