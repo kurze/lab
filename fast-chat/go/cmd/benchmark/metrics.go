@@ -1,6 +1,7 @@
 package main
 
 import (
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -26,9 +27,9 @@ type Metrics struct {
 
 func NewMetrics() *Metrics {
 	return &Metrics{
-		latencies:        make([]time.Duration, 0, 100000),
-		connectDurations: make([]time.Duration, 0, 10000),
-		pendingRTT:       make(map[string]time.Time),
+		latencies:        make([]time.Duration, 0, 1000),
+		connectDurations: make([]time.Duration, 0, 1000),
+		pendingRTT:       make(map[string]time.Time, 1000),
 		StartTime:        time.Now(),
 	}
 }
@@ -135,7 +136,7 @@ func (m *Metrics) CalculateStats() *Stats {
 	if len(m.latencies) > 0 {
 		sorted := make([]time.Duration, len(m.latencies))
 		copy(sorted, m.latencies)
-		sortDurations(sorted)
+		sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
 
 		stats.LatencyMin = sorted[0]
 		stats.LatencyMax = sorted[len(sorted)-1]
@@ -154,7 +155,7 @@ func (m *Metrics) CalculateStats() *Stats {
 	if len(m.connectDurations) > 0 {
 		sorted := make([]time.Duration, len(m.connectDurations))
 		copy(sorted, m.connectDurations)
-		sortDurations(sorted)
+		sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
 
 		stats.ConnectMax = sorted[len(sorted)-1]
 		var sum time.Duration
@@ -176,12 +177,4 @@ func percentile(sorted []time.Duration, p float64) time.Duration {
 		idx = len(sorted) - 1
 	}
 	return sorted[idx]
-}
-
-func sortDurations(durations []time.Duration) {
-	for i := 1; i < len(durations); i++ {
-		for j := i; j > 0 && durations[j] < durations[j-1]; j-- {
-			durations[j], durations[j-1] = durations[j-1], durations[j]
-		}
-	}
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -187,12 +186,6 @@ func (c *BenchClient) readLoopWebSocket() {
 	defer c.wg.Done()
 
 	for {
-		select {
-		case <-c.stopChan:
-			return
-		default:
-		}
-
 		c.ws.SetReadDeadline(time.Now().Add(60 * time.Second))
 		_, message, err := c.ws.ReadMessage()
 		if err != nil {
@@ -207,23 +200,16 @@ func (c *BenchClient) readLoopWebTransport() {
 	defer c.wg.Done()
 
 	for {
-		select {
-		case <-c.stopChan:
-			return
-		case <-c.ctx.Done():
-			return
-		default:
-		}
-
-		readCtx, cancel := context.WithTimeout(c.ctx, 60*time.Second)
-		data, err := c.wt.ReceiveDatagram(readCtx)
-		cancel()
-
+		data, err := c.wt.ReceiveDatagram(c.ctx)
 		if err != nil {
-			if err == context.DeadlineExceeded {
-				continue
+			select {
+			case <-c.stopChan:
+				return
+			case <-c.ctx.Done():
+				return
+			default:
+				return
 			}
-			return
 		}
 
 		c.handleMessage(data)
@@ -232,25 +218,6 @@ func (c *BenchClient) readLoopWebTransport() {
 
 func (c *BenchClient) handleMessage(data []byte) {
 	c.metrics.RecordMessageReceived("", int64(len(data)))
-
-	var msg struct {
-		Type string          `json:"type"`
-		Data json.RawMessage `json:"data"`
-	}
-
-	if err := json.Unmarshal(data, &msg); err != nil {
-		c.metrics.RecordError()
-		return
-	}
-
-	if msg.Type == "message" {
-		var msgData struct {
-			ClientID string `json:"clientId"`
-		}
-		if err := json.Unmarshal(msg.Data, &msgData); err == nil && msgData.ClientID != "" {
-			c.metrics.RecordMessageReceived(msgData.ClientID, 0)
-		}
-	}
 }
 
 func (c *BenchClient) Close() error {
