@@ -17,12 +17,12 @@ pub struct Connection {
     #[allow(dead_code)]
     pub transport: TransportType,
     last_seen: Arc<AtomicI64>,
-    pub send_chan: mpsc::Sender<String>,
+    pub send_chan: mpsc::Sender<Arc<String>>,
     closed: Arc<AtomicBool>,
 }
 
 impl Connection {
-    pub fn new(transport: TransportType, buffer_size: usize) -> (Self, mpsc::Receiver<String>) {
+    pub fn new(transport: TransportType, buffer_size: usize) -> (Self, mpsc::Receiver<Arc<String>>) {
         let (sender, receiver) = mpsc::channel(buffer_size);
         let now = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
         
@@ -51,12 +51,22 @@ impl Connection {
         self.last_seen.store(now, Ordering::Relaxed);
     }
 
-    pub fn send(&self, msg: String) -> bool {
+    pub fn send(&self, msg: Arc<String>) -> bool {
         if self.is_closed() {
             return false;
         }
 
-        self.send_chan.try_send(msg).is_ok()
+        match self.send_chan.try_send(msg.clone()) {
+            Ok(_) => true,
+            Err(mpsc::error::TrySendError::Full(msg)) => {
+                let send_chan = self.send_chan.clone();
+                tokio::spawn(async move {
+                    let _ = send_chan.send(msg).await;
+                });
+                true
+            }
+            Err(mpsc::error::TrySendError::Closed(_)) => false,
+        }
     }
 
     pub fn close(&self) {

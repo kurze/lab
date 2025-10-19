@@ -28,7 +28,7 @@ async fn handle_socket(socket: WebSocket, state: Arc<ChatState>) {
     let state_clone = state.clone();
     let send_task = tokio::spawn(async move {
         while let Some(msg) = receiver.recv().await {
-            if ws_sender.send(Message::Text(msg)).await.is_err() {
+            if ws_sender.send(Message::Text((*msg).clone())).await.is_err() {
                 break;
             }
         }
@@ -99,7 +99,7 @@ async fn handle_client_message(data: &str, conn: &Connection, state: &Arc<ChatSt
 
             if let Some(client_id) = client_id {
                 let echo_msg = create_echo_message(&msg, client_id);
-                conn.send(echo_msg);
+                conn.send(std::sync::Arc::new(echo_msg));
             }
 
             let json_msg = msg.to_json();
@@ -128,9 +128,9 @@ async fn handle_client_message(data: &str, conn: &Connection, state: &Arc<ChatSt
             let messages = state.get_history(skip, take);
 
             if !messages.is_empty() {
-                let history_refs: Vec<&crate::chat::Message> = messages.iter().collect();
+                let history_refs: Vec<&crate::chat::Message> = messages.iter().map(|m| m.as_ref()).collect();
                 let history_json = history_messages_json(history_refs);
-                conn.send(history_json);
+                conn.send(std::sync::Arc::new(history_json));
             }
         }
 

@@ -74,11 +74,11 @@ impl ChatState {
         msg
     }
 
-    pub fn get_last_n(&self, n: usize) -> Vec<Message> {
+    pub fn get_last_n(&self, n: usize) -> Vec<Arc<Message>> {
         self.messages.read().get_last(n)
     }
 
-    pub fn get_history(&self, skip: usize, take: usize) -> Vec<Message> {
+    pub fn get_history(&self, skip: usize, take: usize) -> Vec<Arc<Message>> {
         self.messages.read().get_history(skip, take)
     }
 
@@ -118,30 +118,24 @@ impl ChatState {
     }
 
     pub fn broadcast(&self, msg: String) {
-        let connections: Vec<Connection> = self
-            .connections
-            .read()
-            .values()
-            .filter(|conn| !conn.is_closed())
-            .cloned()
-            .collect();
-
-        for conn in connections {
-            conn.send(msg.clone());
+        let msg = Arc::new(msg);
+        let connections = self.connections.read();
+        
+        for conn in connections.values() {
+            if !conn.is_closed() {
+                conn.send(Arc::clone(&msg));
+            }
         }
     }
 
     pub fn broadcast_except(&self, msg: String, except_id: Uuid) {
-        let connections: Vec<Connection> = self
-            .connections
-            .read()
-            .iter()
-            .filter(|(id, conn)| **id != except_id && !conn.is_closed())
-            .map(|(_, conn)| conn.clone())
-            .collect();
-
-        for conn in connections {
-            conn.send(msg.clone());
+        let msg = Arc::new(msg);
+        let connections = self.connections.read();
+        
+        for (id, conn) in connections.iter() {
+            if *id != except_id && !conn.is_closed() {
+                conn.send(Arc::clone(&msg));
+            }
         }
     }
 

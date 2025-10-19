@@ -4,6 +4,7 @@ use std::path::Path;
 use tokio::fs::{File, OpenOptions};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::mpsc;
+use tokio::time::{interval, Duration};
 
 pub struct MessageLogger {
     sender: mpsc::Sender<Message>,
@@ -31,14 +32,40 @@ impl MessageLogger {
 }
 
 async fn write_loop(mut file: File, mut receiver: mpsc::Receiver<Message>) {
-    while let Some(msg) = receiver.recv().await {
-        if let Ok(json) = serde_json::to_string(&msg) {
-            let _ = file.write_all(json.as_bytes()).await;
-            let _ = file.write_all(b"\n").await;
+    let mut flush_interval = interval(Duration::from_millis(100));
+    let mut pending_count = 0usize;
+    const FLUSH_THRESHOLD: usize = 1000;
+    
+    loop {
+        tokio::select! {
+            msg = receiver.recv() => {
+                match msg {
+                    Some(msg) => {
+                        if let Ok(json) = serde_json::to_string(&msg) {
+                            let _ = file.write_all(json.as_bytes()).await;
+                            let _ = file.write_all(b"\n").await;
+                            pending_count += 1;
+                            
+                            if pending_count >= FLUSH_THRESHOLD {
+                                let _ = file.flush().await;
+                                pending_count = 0;
+                            }
+                        }
+                    }
+                    None => {
+                        let _ = file.flush().await;
+                        break;
+                    }
+                }
+            }
+            _ = flush_interval.tick() => {
+                if pending_count > 0 {
+                    let _ = file.flush().await;
+                    pending_count = 0;
+                }
+            }
         }
     }
-    
-    let _ = file.flush().await;
 }
 
 pub async fn load_messages(filename: &str) -> Result<Vec<Message>> {

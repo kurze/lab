@@ -1,13 +1,12 @@
-use parking_lot::Mutex;
 use super::message::Message;
+use std::sync::Arc;
 
 pub struct RingBuffer {
-    buffer: Vec<Option<Message>>,
+    buffer: Vec<Option<Arc<Message>>>,
     size: usize,
     head: usize,
     tail: usize,
     count: usize,
-    mu: Mutex<()>,
 }
 
 impl RingBuffer {
@@ -18,14 +17,11 @@ impl RingBuffer {
             head: 0,
             tail: 0,
             count: 0,
-            mu: Mutex::new(()),
         }
     }
 
     pub fn push(&mut self, msg: Message) {
-        let _lock = self.mu.lock();
-        
-        self.buffer[self.head] = Some(msg);
+        self.buffer[self.head] = Some(Arc::new(msg));
         self.head = (self.head + 1) % self.size;
 
         if self.count < self.size {
@@ -35,9 +31,7 @@ impl RingBuffer {
         }
     }
 
-    pub fn get_last(&self, n: usize) -> Vec<Message> {
-        let _lock = self.mu.lock();
-
+    pub fn get_last(&self, n: usize) -> Vec<Arc<Message>> {
         if self.count == 0 {
             return vec![];
         }
@@ -49,16 +43,14 @@ impl RingBuffer {
         for i in 0..n {
             let pos = (start_pos + i) % self.size;
             if let Some(ref msg) = self.buffer[pos] {
-                result.push(msg.clone());
+                result.push(Arc::clone(msg));
             }
         }
 
         result
     }
 
-    pub fn get_history(&self, skip: usize, take: usize) -> Vec<Message> {
-        let _lock = self.mu.lock();
-
+    pub fn get_history(&self, skip: usize, take: usize) -> Vec<Arc<Message>> {
         if self.count == 0 {
             return vec![];
         }
@@ -77,7 +69,7 @@ impl RingBuffer {
         for i in 0..actual_take {
             let pos = (start_pos + i) % self.size;
             if let Some(ref msg) = self.buffer[pos] {
-                result.push(msg.clone());
+                result.push(Arc::clone(msg));
             }
         }
 
@@ -86,7 +78,6 @@ impl RingBuffer {
 
     #[allow(dead_code)]
     pub fn count(&self) -> usize {
-        let _lock = self.mu.lock();
         self.count
     }
 
