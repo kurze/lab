@@ -48,6 +48,13 @@ func main() {
 	log.Printf("")
 
 	metrics := NewMetrics()
+	if *scenario == "validation" {
+		metrics.ValidationMode = true
+		if *clients < 3 {
+			*clients = 3
+			log.Printf("Validation mode requires at least 3 clients, using 3")
+		}
+	}
 	pool := NewClientPool(*url, *protocol, *insecure, *certFile, metrics)
 
 	sigChan := make(chan os.Signal, 1)
@@ -133,12 +140,14 @@ func printHelp() {
 	fmt.Println("        Show this help message")
 	fmt.Println("")
 	fmt.Println("Scenarios:")
+	fmt.Println("  validation - Validates all functionality (JOIN, SEND, HISTORY, PING, broadcast)")
 	fmt.Println("  storm      - All clients connect simultaneously and stay idle")
 	fmt.Println("  flood      - All clients send messages at maximum rate")
 	fmt.Println("  realistic  - Clients send messages with random intervals (Poisson)")
 	fmt.Println("  history    - All clients request message history")
 	fmt.Println("  mixed      - Combination of messaging and history requests")
 	fmt.Println("  burst      - Periodic bursts of messages")
+	fmt.Println("  extreme    - Connection churn, base rate, surge cycles (deterministic)")
 	fmt.Println("")
 	fmt.Println("Examples:")
 	fmt.Println("  # Test with 100 clients for 30 seconds (realistic chat)")

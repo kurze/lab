@@ -21,6 +21,10 @@ type Metrics struct {
 	connectDurations []time.Duration
 	pendingRTT       map[string]time.Time
 
+	ValidationMode bool
+	validationMu   sync.Mutex
+	rawMessages    [][]byte
+
 	StartTime time.Time
 	EndTime   time.Time
 }
@@ -30,8 +34,15 @@ func NewMetrics() *Metrics {
 		latencies:        make([]time.Duration, 0, 1000),
 		connectDurations: make([]time.Duration, 0, 1000),
 		pendingRTT:       make(map[string]time.Time, 1000),
+		rawMessages:      make([][]byte, 0),
 		StartTime:        time.Now(),
 	}
+}
+
+func (m *Metrics) RecordRawMessage(data []byte) {
+	m.validationMu.Lock()
+	m.rawMessages = append(m.rawMessages, append([]byte(nil), data...))
+	m.validationMu.Unlock()
 }
 
 func (m *Metrics) RecordConnectionSuccess(duration time.Duration) {

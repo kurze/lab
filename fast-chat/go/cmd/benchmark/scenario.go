@@ -295,6 +295,166 @@ func (s *BurstScenario) Run(pool *ClientPool, duration time.Duration) error {
 	return nil
 }
 
+type ExtremeLoadScenario struct {
+	MessageRate int
+}
+
+func (s *ExtremeLoadScenario) Name() string {
+	return "extreme"
+}
+
+func (s *ExtremeLoadScenario) Description() string {
+	return fmt.Sprintf("Extreme load: connection churn, base rate, surge cycles (%d msgs/sec base)", s.MessageRate)
+}
+
+func (s *ExtremeLoadScenario) Run(pool *ClientPool, duration time.Duration) error {
+	log.Printf("Running extreme load scenario for %v", duration)
+	log.Printf("Base rate: %d msgs/sec, Surge: 3x, Churn: 10%% every 10s", s.MessageRate)
+
+	clients := pool.GetClients()
+	var wg sync.WaitGroup
+	stopChan := make(chan struct{})
+
+	numMessagers := len(clients) * 70 / 100
+	numHistoryLoaders := len(clients) * 20 / 100
+
+	surgeActive := false
+	surgeMu := sync.RWMutex{}
+
+	for i, client := range clients {
+		if i < numMessagers {
+			wg.Add(1)
+			go func(c *BenchClient, idx int) {
+				defer wg.Done()
+
+				baseInterval := time.Second / time.Duration(s.MessageRate)
+				ticker := time.NewTicker(baseInterval)
+				defer ticker.Stop()
+
+				msgNum := 0
+				for {
+					select {
+					case <-stopChan:
+						return
+					case <-ticker.C:
+						surgeMu.RLock()
+						active := surgeActive
+						surgeMu.RUnlock()
+
+						if active {
+							ticker.Reset(baseInterval / 3)
+						} else {
+							ticker.Reset(baseInterval)
+						}
+
+						text := fmt.Sprintf("msg-%d-%d", idx, msgNum)
+						c.SendMessage(text)
+						msgNum++
+					}
+				}
+			}(client, i)
+		} else if i < numMessagers+numHistoryLoaders {
+			wg.Add(1)
+			go func(c *BenchClient, idx int) {
+				defer wg.Done()
+
+				ticker := time.NewTicker(3 * time.Second)
+				defer ticker.Stop()
+
+				reqNum := 0
+				for {
+					select {
+					case <-stopChan:
+						return
+					case <-ticker.C:
+						skip := (reqNum * 10) % 100
+						take := 10
+						c.RequestHistory(skip, take)
+						reqNum++
+					}
+				}
+			}(client, i)
+		}
+	}
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		surgeTicker := time.NewTicker(20 * time.Second)
+		defer surgeTicker.Stop()
+
+		churnTicker := time.NewTicker(10 * time.Second)
+		defer churnTicker.Stop()
+
+		progressTicker := time.NewTicker(5 * time.Second)
+		defer progressTicker.Stop()
+
+		startTime := time.Now()
+		churnCycle := 0
+
+		for {
+			select {
+			case <-stopChan:
+				return
+			case <-surgeTicker.C:
+				surgeMu.Lock()
+				surgeActive = !surgeActive
+				surgeMu.Unlock()
+				if surgeActive {
+					log.Printf("SURGE: Message rate increased to %dx", 3)
+				} else {
+					log.Printf("NORMAL: Message rate back to base")
+				}
+			case <-churnTicker.C:
+				churnCycle++
+				churnCount := len(clients) / 10
+				startIdx := (churnCycle * churnCount) % len(clients)
+				endIdx := (startIdx + churnCount) % len(clients)
+
+				if endIdx > startIdx {
+					for i := startIdx; i < endIdx; i++ {
+						clients[i].Close()
+						newClient := NewBenchClient(clients[i].nickname, pool.protocol, pool.metrics)
+						if err := newClient.Connect(pool.url, pool.insecure, pool.certFile); err == nil {
+							newClient.Join()
+							clients[i] = newClient
+						}
+					}
+				} else {
+					for i := startIdx; i < len(clients); i++ {
+						clients[i].Close()
+						newClient := NewBenchClient(clients[i].nickname, pool.protocol, pool.metrics)
+						if err := newClient.Connect(pool.url, pool.insecure, pool.certFile); err == nil {
+							newClient.Join()
+							clients[i] = newClient
+						}
+					}
+					for i := 0; i < endIdx; i++ {
+						clients[i].Close()
+						newClient := NewBenchClient(clients[i].nickname, pool.protocol, pool.metrics)
+						if err := newClient.Connect(pool.url, pool.insecure, pool.certFile); err == nil {
+							newClient.Join()
+							clients[i] = newClient
+						}
+					}
+				}
+				log.Printf("CHURN: Reconnected %d clients (cycle %d)", churnCount, churnCycle)
+			case <-progressTicker.C:
+				elapsed := time.Since(startTime)
+				log.Printf("Progress: %.0f%% complete, surge: %v", float64(elapsed)/float64(duration)*100, surgeActive)
+			}
+		}
+	}()
+
+	time.Sleep(duration)
+	close(stopChan)
+	wg.Wait()
+
+	log.Printf("Extreme load complete")
+	return nil
+}
+
 func GetScenario(name string, rate int) Scenario {
 	switch name {
 	case "storm":
@@ -316,6 +476,10 @@ func GetScenario(name string, rate int) Scenario {
 			BurstSize:     10,
 			BurstInterval: 5 * time.Second,
 		}
+	case "validation":
+		return &ValidationScenario{}
+	case "extreme":
+		return &ExtremeLoadScenario{MessageRate: rate}
 	default:
 		return &RealisticChatScenario{AvgMsgsPerMin: 10}
 	}

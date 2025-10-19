@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -218,6 +219,30 @@ func (c *BenchClient) readLoopWebTransport() {
 
 func (c *BenchClient) handleMessage(data []byte) {
 	c.metrics.RecordMessageReceived("", int64(len(data)))
+
+	if c.metrics.ValidationMode {
+		c.metrics.RecordRawMessage(data)
+		return
+	}
+
+	var msg struct {
+		Type string          `json:"type"`
+		Data json.RawMessage `json:"data"`
+	}
+
+	if err := json.Unmarshal(data, &msg); err != nil {
+		c.metrics.RecordError()
+		return
+	}
+
+	if msg.Type == "message" {
+		var msgData struct {
+			ClientID string `json:"clientId"`
+		}
+		if err := json.Unmarshal(msg.Data, &msgData); err == nil && msgData.ClientID != "" {
+			c.metrics.RecordMessageReceived(msgData.ClientID, 0)
+		}
+	}
 }
 
 func (c *BenchClient) Close() error {
