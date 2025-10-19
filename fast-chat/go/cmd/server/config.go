@@ -34,11 +34,30 @@ type LoggingConfig struct {
 }
 
 type TimeoutsConfig struct {
-	MaxIdleTimeout  time.Duration `json:"max_idle_timeout"`
-	ReadDeadline    time.Duration `json:"read_deadline"`
-	WriteDeadline   time.Duration `json:"write_deadline"`
-	PingInterval    time.Duration `json:"ping_interval"`
-	ShutdownTimeout time.Duration `json:"shutdown_timeout"`
+	MaxIdleTimeout  Duration `json:"max_idle_timeout"`
+	ReadDeadline    Duration `json:"read_deadline"`
+	WriteDeadline   Duration `json:"write_deadline"`
+	PingInterval    Duration `json:"ping_interval"`
+	ShutdownTimeout Duration `json:"shutdown_timeout"`
+}
+
+type Duration time.Duration
+
+func (d *Duration) UnmarshalJSON(b []byte) error {
+	var nanos int64
+	if err := json.Unmarshal(b, &nanos); err != nil {
+		return err
+	}
+	*d = Duration(nanos)
+	return nil
+}
+
+func (d Duration) MarshalJSON() ([]byte, error) {
+	return json.Marshal(int64(d))
+}
+
+func (d Duration) ToDuration() time.Duration {
+	return time.Duration(d)
 }
 
 type LimitsConfig struct {
@@ -74,21 +93,21 @@ func DefaultConfig() *Config {
 			H3Addr: ":8443",
 		},
 		TLS: TLSConfig{
-			CertFile: "../certs/cert.pem",
-			KeyFile:  "../certs/key.pem",
+			CertFile: "certs/cert.pem",
+			KeyFile:  "certs/key.pem",
 		},
 		Security: SecurityConfig{
 			AllowedOrigins: []string{"https://chat.local:8443"},
 		},
 		Logging: LoggingConfig{
-			MessageLogFile: "../logs/messages.jsonl",
+			MessageLogFile: "logs/messages.jsonl",
 		},
 		Timeouts: TimeoutsConfig{
-			MaxIdleTimeout:  60 * time.Second,
-			ReadDeadline:    60 * time.Second,
-			WriteDeadline:   10 * time.Second,
-			PingInterval:    30 * time.Second,
-			ShutdownTimeout: 10 * time.Second,
+			MaxIdleTimeout:  Duration(60 * time.Second),
+			ReadDeadline:    Duration(60 * time.Second),
+			WriteDeadline:   Duration(10 * time.Second),
+			PingInterval:    Duration(30 * time.Second),
+			ShutdownTimeout: Duration(10 * time.Second),
 		},
 		Limits: LimitsConfig{
 			MaxMessages:       1000,

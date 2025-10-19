@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	defaultConfigFile = "../config.json"
+	defaultConfigFile = "go-config.json"
 )
 
 func checkOrigin(allowedOrigins []string) func(*http.Request) bool {
@@ -49,7 +49,7 @@ func main() {
 		log.Fatalf("%v", err)
 	}
 
-	if err := os.MkdirAll("../logs", 0755); err != nil {
+	if err := os.MkdirAll("logs", 0755); err != nil {
 		log.Fatalf("Failed to create logs directory: %v", err)
 	}
 
@@ -81,7 +81,7 @@ func main() {
 
 	quicConfig := &quic.Config{
 		EnableDatagrams: true,
-		MaxIdleTimeout:  config.Timeouts.MaxIdleTimeout,
+		MaxIdleTimeout:  config.Timeouts.MaxIdleTimeout.ToDuration(),
 		Allow0RTT:       true,
 	}
 
@@ -183,7 +183,7 @@ func main() {
 	case <-sigChan:
 		log.Println("Shutting down servers...")
 
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), config.Timeouts.ShutdownTimeout)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), config.Timeouts.ShutdownTimeout.ToDuration())
 		defer cancel()
 
 		if err := h2Server.Shutdown(shutdownCtx); err != nil {
