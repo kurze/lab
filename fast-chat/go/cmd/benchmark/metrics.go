@@ -16,6 +16,12 @@ type Metrics struct {
 	BytesReceived        int64
 	ErrorCount           int64
 
+	batchMu        sync.Mutex
+	batchMsgSent   int64
+	batchMsgRecv   int64
+	batchBytesSent int64
+	batchBytesRecv int64
+
 	latencyMu        sync.Mutex
 	latencies        []time.Duration
 	connectDurations []time.Duration
@@ -27,16 +33,20 @@ type Metrics struct {
 
 	StartTime time.Time
 	EndTime   time.Time
+	stopBatch chan struct{}
 }
 
 func NewMetrics() *Metrics {
-	return &Metrics{
+	m := &Metrics{
 		latencies:        make([]time.Duration, 0, 1000),
 		connectDurations: make([]time.Duration, 0, 1000),
 		pendingRTT:       make(map[string]time.Time, 1000),
 		rawMessages:      make([][]byte, 0),
 		StartTime:        time.Now(),
+		stopBatch:        make(chan struct{}),
 	}
+	go m.batchFlush()
+	return m
 }
 
 func (m *Metrics) RecordRawMessage(data []byte) {
@@ -57,13 +67,48 @@ func (m *Metrics) RecordConnectionFailure() {
 }
 
 func (m *Metrics) RecordMessageSent(clientID string, bytes int64) {
-	atomic.AddInt64(&m.MessagesSent, 1)
-	atomic.AddInt64(&m.BytesSent, bytes)
+	atomic.AddInt64(&m.batchMsgSent, 1)
+	atomic.AddInt64(&m.batchBytesSent, bytes)
 }
 
 func (m *Metrics) RecordMessageReceived(clientID string, bytes int64) {
-	atomic.AddInt64(&m.MessagesReceived, 1)
-	atomic.AddInt64(&m.BytesReceived, bytes)
+	atomic.AddInt64(&m.batchMsgRecv, 1)
+	atomic.AddInt64(&m.batchBytesRecv, bytes)
+}
+
+func (m *Metrics) batchFlush() {
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-m.stopBatch:
+			m.flushBatch()
+			return
+		case <-ticker.C:
+			m.flushBatch()
+		}
+	}
+}
+
+func (m *Metrics) flushBatch() {
+	sent := atomic.SwapInt64(&m.batchMsgSent, 0)
+	recv := atomic.SwapInt64(&m.batchMsgRecv, 0)
+	bytesSent := atomic.SwapInt64(&m.batchBytesSent, 0)
+	bytesRecv := atomic.SwapInt64(&m.batchBytesRecv, 0)
+
+	if sent > 0 {
+		atomic.AddInt64(&m.MessagesSent, sent)
+	}
+	if recv > 0 {
+		atomic.AddInt64(&m.MessagesReceived, recv)
+	}
+	if bytesSent > 0 {
+		atomic.AddInt64(&m.BytesSent, bytesSent)
+	}
+	if bytesRecv > 0 {
+		atomic.AddInt64(&m.BytesReceived, bytesRecv)
+	}
 }
 
 func (m *Metrics) RecordError() {
@@ -72,6 +117,7 @@ func (m *Metrics) RecordError() {
 
 func (m *Metrics) Stop() {
 	m.EndTime = time.Now()
+	close(m.stopBatch)
 }
 
 type Stats struct {

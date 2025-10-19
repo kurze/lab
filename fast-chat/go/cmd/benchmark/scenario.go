@@ -5,6 +5,7 @@ import (
 	"log"
 	"math/rand"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -318,8 +319,7 @@ func (s *ExtremeLoadScenario) Run(pool *ClientPool, duration time.Duration) erro
 	numMessagers := len(clients) * 60 / 100
 	numHistoryLoaders := len(clients) * 15 / 100
 
-	surgeActive := false
-	surgeMu := sync.RWMutex{}
+	surgeActive := uint32(0)
 
 	for i, client := range clients {
 		if i < numMessagers {
@@ -328,28 +328,39 @@ func (s *ExtremeLoadScenario) Run(pool *ClientPool, duration time.Duration) erro
 				defer wg.Done()
 
 				baseInterval := time.Second / time.Duration(s.MessageRate)
-				ticker := time.NewTicker(baseInterval)
-				defer ticker.Stop()
+				surgeInterval := baseInterval / 2
+				baseTicker := time.NewTicker(baseInterval)
+				surgeTicker := time.NewTicker(surgeInterval)
+				surgeTicker.Stop()
+				defer baseTicker.Stop()
+				defer surgeTicker.Stop()
 
 				msgNum := 0
+				var activeTicker *time.Ticker
+				activeTicker = baseTicker
+
 				for {
 					select {
 					case <-stopChan:
 						return
-					case <-ticker.C:
-						surgeMu.RLock()
-						active := surgeActive
-						surgeMu.RUnlock()
-
-						if active {
-							ticker.Reset(baseInterval / 2)
-						} else {
-							ticker.Reset(baseInterval)
-						}
-
+					case <-activeTicker.C:
 						text := fmt.Sprintf("m%d", msgNum)
 						c.SendMessage(text)
 						msgNum++
+
+						if atomic.LoadUint32(&surgeActive) == 1 {
+							if activeTicker == baseTicker {
+								baseTicker.Stop()
+								surgeTicker.Reset(surgeInterval)
+								activeTicker = surgeTicker
+							}
+						} else {
+							if activeTicker == surgeTicker {
+								surgeTicker.Stop()
+								baseTicker.Reset(baseInterval)
+								activeTicker = baseTicker
+							}
+						}
 					}
 				}
 			}(client, i)
@@ -398,13 +409,12 @@ func (s *ExtremeLoadScenario) Run(pool *ClientPool, duration time.Duration) erro
 			case <-stopChan:
 				return
 			case <-surgeTicker.C:
-				surgeMu.Lock()
-				surgeActive = !surgeActive
-				surgeMu.Unlock()
-				if surgeActive {
-					log.Printf("SURGE: Message rate increased to %dx", 2)
-				} else {
+				if atomic.LoadUint32(&surgeActive) == 1 {
+					atomic.StoreUint32(&surgeActive, 0)
 					log.Printf("NORMAL: Message rate back to base")
+				} else {
+					atomic.StoreUint32(&surgeActive, 1)
+					log.Printf("SURGE: Message rate increased to %dx", 2)
 				}
 			case <-churnTicker.C:
 				churnCycle++
@@ -442,7 +452,7 @@ func (s *ExtremeLoadScenario) Run(pool *ClientPool, duration time.Duration) erro
 				log.Printf("CHURN: Reconnected %d clients (cycle %d)", churnCount, churnCycle)
 			case <-progressTicker.C:
 				elapsed := time.Since(startTime)
-				log.Printf("Progress: %.0f%% complete, surge: %v", float64(elapsed)/float64(duration)*100, surgeActive)
+				log.Printf("Progress: %.0f%% complete, surge: %v", float64(elapsed)/float64(duration)*100, atomic.LoadUint32(&surgeActive) == 1)
 			}
 		}
 	}()

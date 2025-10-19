@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -12,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -27,8 +27,7 @@ type BenchClient struct {
 	metrics   *Metrics
 	stopChan  chan struct{}
 	wg        sync.WaitGroup
-	mu        sync.Mutex
-	closed    bool
+	closed    uint32
 	ctx       context.Context
 	ctxCancel context.CancelFunc
 }
@@ -168,10 +167,7 @@ func (c *BenchClient) Ping() error {
 }
 
 func (c *BenchClient) sendRaw(msg string) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if c.closed {
+	if atomic.LoadUint32(&c.closed) == 1 {
 		return fmt.Errorf("client closed")
 	}
 
@@ -186,8 +182,9 @@ func (c *BenchClient) sendRaw(msg string) error {
 func (c *BenchClient) readLoopWebSocket() {
 	defer c.wg.Done()
 
+	c.ws.SetReadDeadline(time.Time{})
+
 	for {
-		c.ws.SetReadDeadline(time.Now().Add(60 * time.Second))
 		_, message, err := c.ws.ReadMessage()
 		if err != nil {
 			return
@@ -222,39 +219,16 @@ func (c *BenchClient) handleMessage(data []byte) {
 
 	if c.metrics.ValidationMode {
 		c.metrics.RecordRawMessage(data)
-		return
-	}
-
-	var msg struct {
-		Type string          `json:"type"`
-		Data json.RawMessage `json:"data"`
-	}
-
-	if err := json.Unmarshal(data, &msg); err != nil {
-		c.metrics.RecordError()
-		return
-	}
-
-	if msg.Type == "message" {
-		var msgData struct {
-			ClientID string `json:"clientId"`
-		}
-		if err := json.Unmarshal(msg.Data, &msgData); err == nil && msgData.ClientID != "" {
-			c.metrics.RecordMessageReceived(msgData.ClientID, 0)
-		}
 	}
 }
 
 func (c *BenchClient) Close() error {
-	c.mu.Lock()
-	if c.closed {
-		c.mu.Unlock()
+	if atomic.SwapUint32(&c.closed, 1) == 1 {
 		return nil
 	}
-	c.closed = true
+
 	close(c.stopChan)
 	c.ctxCancel()
-	c.mu.Unlock()
 
 	if c.ws != nil {
 		c.ws.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
