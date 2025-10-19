@@ -1,0 +1,220 @@
+version: '3'
+
+tasks:
+  # Default task
+  default:
+    desc: Build and run Go server (default development workflow)
+    cmds:
+      - task: dev:go
+
+  # ============================================================================
+  # Build Tasks
+  # ============================================================================
+  
+  build:
+    desc: Build all binaries (Go + Rust)
+    deps: [build:go, build:rust]
+
+  build:go:
+    desc: Build all Go binaries
+    deps: [build:go:server, build:go:benchmark]
+
+  build:go:server:
+    desc: Build the Go server binary
+    dir: go
+    cmds:
+      - go build -o ../bin/server-go ./cmd/server
+
+  build:go:benchmark:
+    desc: Build the benchmark binary
+    dir: go
+    cmds:
+      - go build -o ../bin/benchmark ./cmd/benchmark
+
+  build:rust:
+    desc: Build Rust server (release mode, default)
+    deps: [build:rust:release]
+
+  build:rust:release:
+    desc: Build the Rust server binary (release)
+    dir: rust
+    cmds:
+      - cargo build --release
+      - mkdir -p ../bin
+      - cp target/release/fast-chat-server ../bin/server-rust
+
+  build:rust:debug:
+    desc: Build the Rust server binary (debug)
+    dir: rust
+    cmds:
+      - cargo build
+
+  # ============================================================================
+  # Test Tasks
+  # ============================================================================
+
+  test:
+    desc: Run all tests (Go + Rust)
+    deps: [test:go, test:rust]
+
+  test:go:
+    desc: Run all Go tests
+    dir: go
+    cmds:
+      - go test -v ./...
+
+  test:go:coverage:
+    desc: Run Go tests with coverage
+    dir: go
+    cmds:
+      - go test -v -coverprofile=coverage.out ./...
+      - go tool cover -html=coverage.out -o coverage.html
+
+  test:rust:
+    desc: Run all Rust tests
+    dir: rust
+    cmds:
+      - cargo test
+
+  # ============================================================================
+  # Format Tasks
+  # ============================================================================
+
+  format:
+    desc: Format all code (Go + Rust)
+    deps: [format:go, format:rust]
+
+  format:go:
+    desc: Format Go code
+    dir: go
+    cmds:
+      - gofmt -w .
+
+  format:rust:
+    desc: Format Rust code
+    dir: rust
+    cmds:
+      - cargo fmt
+
+  # ============================================================================
+  # Lint Tasks
+  # ============================================================================
+
+  lint:
+    desc: Run all linters (Go + Rust)
+    deps: [lint:go, lint:rust]
+
+  lint:go:
+    desc: Run Go linter
+    dir: go
+    cmds:
+      - |
+        if command -v golangci-lint &> /dev/null; then
+          golangci-lint run
+        else
+          echo "golangci-lint not found, running go vet instead"
+          go vet ./...
+        fi
+
+  lint:rust:
+    desc: Run Rust linter (clippy)
+    dir: rust
+    cmds:
+      - cargo clippy -- -D warnings
+
+  # ============================================================================
+  # Development Tasks
+  # ============================================================================
+
+  dev:
+    desc: Run Go server in development mode (default)
+    cmds:
+      - task: dev:go
+
+  dev:go:
+    desc: Run Go server in development mode
+    deps: [build:go:server]
+    cmds:
+      - ./bin/server-go
+
+  dev:rust:
+    desc: Run Rust server in development mode
+    dir: rust
+    cmds:
+      - cargo run --release
+
+  # ============================================================================
+  # Benchmark Tasks
+  # ============================================================================
+
+  benchmark:
+    desc: Run quick benchmark test (default)
+    cmds:
+      - task: benchmark:quick
+
+  benchmark:quick:
+    desc: Run quick benchmark test (WebSocket, 50 clients, 10s)
+    deps: [build:go:benchmark]
+    cmds:
+      - ./bin/benchmark -cert certs/cert.pem -clients 50 -duration 10s
+
+  benchmark:http3:
+    desc: Run quick benchmark test (HTTP/3 WebTransport, 50 clients, 10s)
+    deps: [build:go:benchmark]
+    cmds:
+      - ./bin/benchmark -protocol webtransport -cert certs/cert.pem -clients 50 -duration 10s
+
+  benchmark:storm:
+    desc: Connection storm test (500 clients, 30s)
+    deps: [build:go:benchmark]
+    cmds:
+      - ./bin/benchmark -scenario storm -clients 500 -duration 30s -cert certs/cert.pem
+
+  benchmark:flood:
+    desc: Message flood test (100 clients, 50 msg/s, 30s)
+    deps: [build:go:benchmark]
+    cmds:
+      - ./bin/benchmark -scenario flood -clients 100 -rate 50 -duration 30s -cert certs/cert.pem
+
+  benchmark:history:
+    desc: History load test (100 clients)
+    deps: [build:go:benchmark]
+    cmds:
+      - ./bin/benchmark -scenario history -clients 100 -cert certs/cert.pem
+
+  benchmark:mixed:
+    desc: Mixed workload test (200 clients, 20 msg/s, 60s)
+    deps: [build:go:benchmark]
+    cmds:
+      - ./bin/benchmark -scenario mixed -clients 200 -rate 20 -duration 60s -cert certs/cert.pem
+
+  benchmark:burst:
+    desc: Burst test (100 clients, 30s)
+    deps: [build:go:benchmark]
+    cmds:
+      - ./bin/benchmark -scenario burst -clients 100 -duration 30s -cert certs/cert.pem
+
+  # ============================================================================
+  # Clean Tasks
+  # ============================================================================
+
+  clean:
+    desc: Clean all build artifacts and logs
+    deps: [clean:go, clean:rust, clean:logs]
+
+  clean:go:
+    desc: Clean Go build artifacts
+    cmds:
+      - rm -rf bin/server-go bin/benchmark
+      - rm -rf go/coverage.out go/coverage.html
+
+  clean:rust:
+    desc: Clean Rust build artifacts
+    cmds:
+      - rm -rf bin/server-rust
+      - rm -rf rust/target
+
+  clean:logs:
+    desc: Clean log files only
+    cmds:
+      - rm -rf logs/*.jsonl
