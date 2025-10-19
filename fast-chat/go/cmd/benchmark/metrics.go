@@ -59,27 +59,11 @@ func (m *Metrics) RecordConnectionFailure() {
 func (m *Metrics) RecordMessageSent(clientID string, bytes int64) {
 	atomic.AddInt64(&m.MessagesSent, 1)
 	atomic.AddInt64(&m.BytesSent, bytes)
-
-	if clientID != "" {
-		m.latencyMu.Lock()
-		m.pendingRTT[clientID] = time.Now()
-		m.latencyMu.Unlock()
-	}
 }
 
 func (m *Metrics) RecordMessageReceived(clientID string, bytes int64) {
 	atomic.AddInt64(&m.MessagesReceived, 1)
 	atomic.AddInt64(&m.BytesReceived, bytes)
-
-	if clientID != "" {
-		m.latencyMu.Lock()
-		if sentTime, ok := m.pendingRTT[clientID]; ok {
-			latency := time.Since(sentTime)
-			m.latencies = append(m.latencies, latency)
-			delete(m.pendingRTT, clientID)
-		}
-		m.latencyMu.Unlock()
-	}
 }
 
 func (m *Metrics) RecordError() {

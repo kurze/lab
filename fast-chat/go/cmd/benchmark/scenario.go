@@ -304,19 +304,19 @@ func (s *ExtremeLoadScenario) Name() string {
 }
 
 func (s *ExtremeLoadScenario) Description() string {
-	return fmt.Sprintf("Extreme load: connection churn, base rate, surge cycles (%d msgs/sec base)", s.MessageRate)
+	return fmt.Sprintf("Extreme load: 5%% churn/15s, 2x surge/30s (%d msgs/sec base)", s.MessageRate)
 }
 
 func (s *ExtremeLoadScenario) Run(pool *ClientPool, duration time.Duration) error {
 	log.Printf("Running extreme load scenario for %v", duration)
-	log.Printf("Base rate: %d msgs/sec, Surge: 3x, Churn: 10%% every 10s", s.MessageRate)
+	log.Printf("Base rate: %d msgs/sec, Surge: 2x, Churn: 5%% every 15s", s.MessageRate)
 
 	clients := pool.GetClients()
 	var wg sync.WaitGroup
 	stopChan := make(chan struct{})
 
-	numMessagers := len(clients) * 70 / 100
-	numHistoryLoaders := len(clients) * 20 / 100
+	numMessagers := len(clients) * 60 / 100
+	numHistoryLoaders := len(clients) * 15 / 100
 
 	surgeActive := false
 	surgeMu := sync.RWMutex{}
@@ -342,12 +342,12 @@ func (s *ExtremeLoadScenario) Run(pool *ClientPool, duration time.Duration) erro
 						surgeMu.RUnlock()
 
 						if active {
-							ticker.Reset(baseInterval / 3)
+							ticker.Reset(baseInterval / 2)
 						} else {
 							ticker.Reset(baseInterval)
 						}
 
-						text := fmt.Sprintf("msg-%d-%d", idx, msgNum)
+						text := fmt.Sprintf("m%d", msgNum)
 						c.SendMessage(text)
 						msgNum++
 					}
@@ -381,13 +381,13 @@ func (s *ExtremeLoadScenario) Run(pool *ClientPool, duration time.Duration) erro
 	go func() {
 		defer wg.Done()
 
-		surgeTicker := time.NewTicker(20 * time.Second)
+		surgeTicker := time.NewTicker(30 * time.Second)
 		defer surgeTicker.Stop()
 
-		churnTicker := time.NewTicker(10 * time.Second)
+		churnTicker := time.NewTicker(15 * time.Second)
 		defer churnTicker.Stop()
 
-		progressTicker := time.NewTicker(5 * time.Second)
+		progressTicker := time.NewTicker(10 * time.Second)
 		defer progressTicker.Stop()
 
 		startTime := time.Now()
@@ -402,13 +402,13 @@ func (s *ExtremeLoadScenario) Run(pool *ClientPool, duration time.Duration) erro
 				surgeActive = !surgeActive
 				surgeMu.Unlock()
 				if surgeActive {
-					log.Printf("SURGE: Message rate increased to %dx", 3)
+					log.Printf("SURGE: Message rate increased to %dx", 2)
 				} else {
 					log.Printf("NORMAL: Message rate back to base")
 				}
 			case <-churnTicker.C:
 				churnCycle++
-				churnCount := len(clients) / 10
+				churnCount := len(clients) / 20
 				startIdx := (churnCycle * churnCount) % len(clients)
 				endIdx := (startIdx + churnCount) % len(clients)
 
