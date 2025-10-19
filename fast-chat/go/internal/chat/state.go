@@ -25,6 +25,15 @@ type ChatState struct {
 
 // NewChatState creates a new chat state
 func NewChatState(logFile string, flushInterval time.Duration) (*ChatState, error) {
+	loadedMessages, err := LoadMessages(logFile)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := ArchiveLogFile(logFile); err != nil {
+		log.Printf("Failed to archive log file: %v", err)
+	}
+
 	logger, err := NewMessageLogger(logFile, flushInterval)
 	if err != nil {
 		return nil, err
@@ -35,13 +44,6 @@ func NewChatState(logFile string, flushInterval time.Duration) (*ChatState, erro
 		connections:  make(map[uuid.UUID]*Connection),
 		nicknamePool: NewNicknamePool(),
 		logger:       logger,
-	}
-
-	// Load messages from log file
-	loadedMessages, err := LoadMessages(logFile)
-	if err != nil {
-		logger.Close()
-		return nil, err
 	}
 
 	// Log the number of messages loaded

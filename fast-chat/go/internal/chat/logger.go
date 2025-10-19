@@ -2,9 +2,13 @@ package chat
 
 import (
 	"bufio"
+	"compress/gzip"
 	"encoding/json"
+	"fmt"
+	"io"
 	"log"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 )
@@ -125,4 +129,60 @@ func LoadMessages(filename string) ([]*Message, error) {
 	}
 
 	return messages, nil
+}
+
+func ArchiveLogFile(filename string) error {
+	info, err := os.Stat(filename)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+
+	if info.Size() == 0 {
+		return nil
+	}
+
+	timestamp := time.Now().Format("20060102-150405")
+	dir := filepath.Dir(filename)
+	base := filepath.Base(filename)
+	archiveName := filepath.Join(dir, fmt.Sprintf("%s.%s.gz", base, timestamp))
+
+	sourceFile, err := os.Open(filename)
+	if err != nil {
+		return err
+	}
+	defer sourceFile.Close()
+
+	archiveFile, err := os.Create(archiveName)
+	if err != nil {
+		return err
+	}
+	defer archiveFile.Close()
+
+	gzipWriter := gzip.NewWriter(archiveFile)
+	defer gzipWriter.Close()
+
+	if _, err := io.Copy(gzipWriter, sourceFile); err != nil {
+		os.Remove(archiveName)
+		return err
+	}
+
+	if err := gzipWriter.Close(); err != nil {
+		os.Remove(archiveName)
+		return err
+	}
+
+	if err := archiveFile.Close(); err != nil {
+		os.Remove(archiveName)
+		return err
+	}
+
+	if err := os.Truncate(filename, 0); err != nil {
+		return err
+	}
+
+	log.Printf("Archived %d bytes to %s", info.Size(), archiveName)
+	return nil
 }

@@ -1,8 +1,9 @@
 use super::message::Message;
 use anyhow::Result;
+use async_compression::tokio::write::GzipEncoder;
 use std::path::Path;
 use tokio::fs::{File, OpenOptions};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, AsyncReadExt, BufReader};
 use tokio::sync::mpsc;
 use tokio::time::{interval, Duration};
 
@@ -78,4 +79,35 @@ pub async fn load_messages(filename: &str) -> Result<Vec<Message>> {
     }
 
     Ok(messages)
+}
+
+pub async fn archive_log_file(filename: &str) -> Result<()> {
+    let path = Path::new(filename);
+    
+    if !path.exists() {
+        return Ok(());
+    }
+
+    let metadata = tokio::fs::metadata(filename).await?;
+    if metadata.len() == 0 {
+        return Ok(());
+    }
+
+    let timestamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
+    let archive_name = format!("{}.{}.gz", filename, timestamp);
+
+    let mut source_file = File::open(filename).await?;
+    let mut contents = Vec::new();
+    source_file.read_to_end(&mut contents).await?;
+    drop(source_file);
+
+    let archive_file = File::create(&archive_name).await?;
+    let mut gzip_writer = GzipEncoder::new(archive_file);
+    gzip_writer.write_all(&contents).await?;
+    gzip_writer.shutdown().await?;
+
+    tokio::fs::write(filename, "").await?;
+
+    tracing::info!("Archived {} bytes to {}", metadata.len(), archive_name);
+    Ok(())
 }

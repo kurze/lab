@@ -1,5 +1,5 @@
 use super::connection::Connection;
-use super::logger::{load_messages, MessageLogger};
+use super::logger::{archive_log_file, load_messages, MessageLogger};
 use super::message::Message;
 use super::nicknames::NicknamePool;
 use super::ringbuffer::RingBuffer;
@@ -21,9 +21,13 @@ pub struct ChatState {
 
 impl ChatState {
     pub async fn new(log_file: &str, max_messages: usize, log_buffer_size: usize, flush_interval: Duration) -> Result<Self> {
-        let logger = MessageLogger::new(log_file, log_buffer_size, flush_interval).await?;
-
         let loaded_messages = load_messages(log_file).await?;
+
+        if let Err(e) = archive_log_file(log_file).await {
+            tracing::warn!("Failed to archive log file: {}", e);
+        }
+
+        let logger = MessageLogger::new(log_file, log_buffer_size, flush_interval).await?;
 
         let total_loaded = loaded_messages.len();
         if total_loaded == 0 {

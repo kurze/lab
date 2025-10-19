@@ -27,6 +27,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tokio-rustls = "0.26"
 rustls-pemfile = "2"
 http-body-util = "0.1"
+async-compression = { version = "0.4", features = ["gzip", "tokio"] }
 
 [profile.release]
 lto = true
