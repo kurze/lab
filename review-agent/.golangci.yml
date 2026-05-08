@@ -1,0 +1,58 @@
+linters:
+  enable:
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - revive
+    - gocritic
+    - misspell
+    - unconvert
+    - unparam
+    - bodyclose
+    - noctx
+    - prealloc
+    - whitespace
+    - gofmt
+    - goimports
+
+linters-settings:
+  revive:
+    rules:
+      - name: exported
+        arguments:
+          - "checkPrivateReceivers"
+        severity: warning
+      - name: blank-imports
+      - name: context-as-argument
+      - name: dot-imports
+      - name: error-return
+      - name: error-strings
+      - name: error-naming
+      - name: increment-decrement
+      - name: var-naming
+      - name: range
+      - name: receiver-naming
+      - name: indent-error-flow
+      - name: empty-block
+      - name: superfluous-else
+      - name: unreachable-code
+      - name: redefines-builtin-id
+
+  gocritic:
+    enabled-checks:
+      - dupImport
+      - ifElseChain
+      - nestingReduce
+      - truncateCmp
+      - underef
+      - unnamedResult
+
+  misspell:
+    locale: US
+
+issues:
+  max-issues-per-linter: 50
+  max-same-issues: 5

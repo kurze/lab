@@ -75,12 +75,13 @@ Rules:
 
 func gitDiff(root, ref string) (string, error) {
 	var args []string
-	if ref == "" || ref == "HEAD" {
+	switch {
+	case ref == "" || ref == "HEAD":
 		args = []string{"diff", "HEAD"}
-	} else if strings.Contains(ref, "..") {
+	case strings.Contains(ref, ".."):
 		parts := strings.SplitN(ref, "..", 2)
 		args = []string{"diff", parts[0], parts[1]}
-	} else {
+	default:
 		args = []string{"diff", ref}
 	}
 	args = append(args, "--no-color", "--unified=5")
@@ -120,4 +121,3 @@ func parseDiffRef(ref string) string {
 	}
 	return ref
 }
-

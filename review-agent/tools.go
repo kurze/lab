@@ -242,7 +242,7 @@ func execListDir(root, path string) ToolResult {
 		return ToolResult{Content: err.Error(), IsError: true}
 	}
 
-	var lines []string
+	lines := make([]string, 0, len(entries))
 	for _, e := range entries {
 		suffix := ""
 		if e.IsDir() {

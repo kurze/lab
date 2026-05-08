@@ -200,7 +200,9 @@ func compactMessages(messages []chatMessage, contextSize int) []chatMessage {
 
 func repairJSON[T any](ctx context.Context, llm *LLMClient, model ModelDef, messages []chatMessage, content string, repairPrompt string, tracer *Tracer, iter int) (*T, error) {
 	for attempt := 0; attempt < 2; attempt++ {
-		repairMessages := append(messages, chatMessage{Role: "assistant", Content: content})
+		repairMessages := make([]chatMessage, len(messages), len(messages)+2)
+		copy(repairMessages, messages)
+		repairMessages = append(repairMessages, chatMessage{Role: "assistant", Content: content})
 		repairMessages = append(repairMessages, chatMessage{
 			Role:    "user",
 			Content: repairPrompt,

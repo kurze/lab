@@ -15,13 +15,13 @@ type ComparisonFinding struct {
 
 type CompareResult struct {
 	Findings       []ComparisonFinding `json:"findings"`
-	OpenQuestions   []string            `json:"open_questions"`
-	ContextPulled   []string            `json:"context_pulled"`
-	IterationsUsed  int                 `json:"iterations_used"`
-	Truncated       bool                `json:"truncated"`
-	ModelUsed       string              `json:"model_used"`
-	ElapsedSec      float64             `json:"elapsed_sec"`
-	TokensUsed      int                 `json:"tokens_used"`
+	OpenQuestions  []string            `json:"open_questions"`
+	ContextPulled  []string            `json:"context_pulled"`
+	IterationsUsed int                 `json:"iterations_used"`
+	Truncated      bool                `json:"truncated"`
+	ModelUsed      string              `json:"model_used"`
+	ElapsedSec     float64             `json:"elapsed_sec"`
+	TokensUsed     int                 `json:"tokens_used"`
 }
 
 func runCompare(ctx context.Context, llm *LLMClient, model ModelDef, root, oldPath, newPath, focus string, maxIter int) (*CompareResult, error) {
@@ -47,13 +47,13 @@ func runCompare(ctx context.Context, llm *LLMClient, model ModelDef, root, oldPa
 	if lr.Truncated {
 		return &CompareResult{
 			Findings:       []ComparisonFinding{},
-			OpenQuestions:   []string{"comparison was truncated before completion"},
-			ContextPulled:   lr.ContextPulled,
-			IterationsUsed:  lr.Iteration,
-			Truncated:       true,
-			ModelUsed:       model.ID,
-			ElapsedSec:      lr.ElapsedSec,
-			TokensUsed:      lr.TokensUsed,
+			OpenQuestions:  []string{"comparison was truncated before completion"},
+			ContextPulled:  lr.ContextPulled,
+			IterationsUsed: lr.Iteration,
+			Truncated:      true,
+			ModelUsed:      model.ID,
+			ElapsedSec:     lr.ElapsedSec,
+			TokensUsed:     lr.TokensUsed,
 		}, nil
 	}
 
@@ -94,24 +94,24 @@ func parseCompareOutput(ctx context.Context, llm *LLMClient, model ModelDef, lr 
 	content := extractJSON(lr.FinalMessage.Content)
 
 	var raw struct {
-		Findings     []ComparisonFinding `json:"findings"`
+		Findings      []ComparisonFinding `json:"findings"`
 		OpenQuestions []string            `json:"open_questions"`
 	}
 
 	if err := json.Unmarshal([]byte(content), &raw); err == nil && raw.Findings != nil {
 		return &CompareResult{
 			Findings:       raw.Findings,
-			OpenQuestions:   raw.OpenQuestions,
-			ContextPulled:   lr.ContextPulled,
-			IterationsUsed:  lr.Iteration,
-			ModelUsed:       model.ID,
-			ElapsedSec:      lr.ElapsedSec,
-			TokensUsed:      lr.TokensUsed,
+			OpenQuestions:  raw.OpenQuestions,
+			ContextPulled:  lr.ContextPulled,
+			IterationsUsed: lr.Iteration,
+			ModelUsed:      model.ID,
+			ElapsedSec:     lr.ElapsedSec,
+			TokensUsed:     lr.TokensUsed,
 		}, nil
 	}
 
 	repaired, err := repairJSON[struct {
-		Findings     []ComparisonFinding `json:"findings"`
+		Findings      []ComparisonFinding `json:"findings"`
 		OpenQuestions []string            `json:"open_questions"`
 	}](ctx, llm, model, lr.Messages, content,
 		"Your response was not valid JSON. Please output ONLY a JSON object with 'findings' (array of objects with category/section/description/impact) and 'open_questions' (array of strings). No markdown, no explanation, just the JSON.",
@@ -123,11 +123,11 @@ func parseCompareOutput(ctx context.Context, llm *LLMClient, model ModelDef, lr 
 
 	return &CompareResult{
 		Findings:       repaired.Findings,
-		OpenQuestions:   repaired.OpenQuestions,
-		ContextPulled:   lr.ContextPulled,
-		IterationsUsed:  lr.Iteration,
-		ModelUsed:       model.ID,
-		ElapsedSec:      lr.ElapsedSec,
-		TokensUsed:      lr.TokensUsed,
+		OpenQuestions:  repaired.OpenQuestions,
+		ContextPulled:  lr.ContextPulled,
+		IterationsUsed: lr.Iteration,
+		ModelUsed:      model.ID,
+		ElapsedSec:     lr.ElapsedSec,
+		TokensUsed:     lr.TokensUsed,
 	}, nil
 }

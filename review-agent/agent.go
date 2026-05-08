@@ -26,11 +26,11 @@ func extractJSON(s string) string {
 }
 
 const (
-	defaultMaxIter    = 12
-	defaultMaxTokens  = 3000
-	perIterTimeout    = 5 * time.Minute
-	totalTimeout      = 20 * time.Minute
-	stuckThreshold    = 3
+	defaultMaxIter   = 12
+	defaultMaxTokens = 3000
+	perIterTimeout   = 5 * time.Minute
+	totalTimeout     = 20 * time.Minute
+	stuckThreshold   = 3
 )
 
 func runAgent(ctx context.Context, llm *LLMClient, model ModelDef, root, artifactPath, focus string, maxIter int) (*ReviewResult, error) {
@@ -92,7 +92,7 @@ func parseReviewOutput(ctx context.Context, llm *LLMClient, model ModelDef, lr *
 	content := extractJSON(lr.FinalMessage.Content)
 
 	var raw struct {
-		Findings     []Finding `json:"findings"`
+		Findings      []Finding `json:"findings"`
 		OpenQuestions []string  `json:"open_questions"`
 	}
 
@@ -103,13 +103,13 @@ func parseReviewOutput(ctx context.Context, llm *LLMClient, model ModelDef, lr *
 			ContextPulled:  lr.ContextPulled,
 			IterationsUsed: lr.Iteration,
 			ModelUsed:      model.ID,
-			ElapsedSec:    lr.ElapsedSec,
-			TokensUsed:    lr.TokensUsed,
+			ElapsedSec:     lr.ElapsedSec,
+			TokensUsed:     lr.TokensUsed,
 		}, nil
 	}
 
 	repaired, err := repairJSON[struct {
-		Findings     []Finding `json:"findings"`
+		Findings      []Finding `json:"findings"`
 		OpenQuestions []string  `json:"open_questions"`
 	}](ctx, llm, model, lr.Messages, content,
 		"Your response was not valid JSON. Please output ONLY a JSON object with 'findings' (array of objects with category/severity/location/description/evidence) and 'open_questions' (array of strings). No markdown, no explanation, just the JSON.",

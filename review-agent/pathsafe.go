@@ -30,7 +30,7 @@ func safePath(root, requested string) (string, error) {
 		return "", fmt.Errorf("resolve path: %w", err)
 	}
 
-	real, err := filepath.EvalSymlinks(abs)
+	resolved, err := filepath.EvalSymlinks(abs)
 	if err != nil {
 		if os.IsNotExist(err) {
 			// File doesn't exist yet — check the parent directory instead.
@@ -47,9 +47,9 @@ func safePath(root, requested string) (string, error) {
 		return "", fmt.Errorf("resolve path: %w", err)
 	}
 
-	if !strings.HasPrefix(real+string(filepath.Separator), root+string(filepath.Separator)) && real != root {
+	if !strings.HasPrefix(resolved+string(filepath.Separator), root+string(filepath.Separator)) && resolved != root {
 		return "", fmt.Errorf("path escapes workspace root: %s", requested)
 	}
 
-	return real, nil
+	return resolved, nil
 }

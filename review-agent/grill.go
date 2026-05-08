@@ -77,8 +77,8 @@ func parseGrillOutput(ctx context.Context, llm *LLMClient, model ModelDef, lr *L
 			ContextPulled:  lr.ContextPulled,
 			IterationsUsed: lr.Iteration,
 			ModelUsed:      model.ID,
-			ElapsedSec:    lr.ElapsedSec,
-			TokensUsed:    lr.TokensUsed,
+			ElapsedSec:     lr.ElapsedSec,
+			TokensUsed:     lr.TokensUsed,
 		}, nil
 	}
 

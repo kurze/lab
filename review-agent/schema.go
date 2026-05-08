@@ -35,4 +35,3 @@ type GrillResult struct {
 	ElapsedSec     float64         `json:"elapsed_sec"`
 	TokensUsed     int             `json:"tokens_used"`
 }
-
