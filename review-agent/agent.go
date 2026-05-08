@@ -60,7 +60,7 @@ func runAgent(ctx context.Context, llm *LLMClient, model ModelDef, root, artifac
 		if err != nil {
 			tracer.Log(TraceEntry{Iteration: iter, Role: "error", Content: err.Error()})
 			if ctx.Err() != nil {
-				return collectPartial(contextPulled, iter, true), nil
+				return collectPartial(model.ID, contextPulled, iter, true), nil
 			}
 			return nil, fmt.Errorf("iteration %d: %w", iter, err)
 		}
@@ -87,12 +87,12 @@ func runAgent(ctx context.Context, llm *LLMClient, model ModelDef, root, artifac
 
 		if stuckCount >= stuckThreshold {
 			tracer.Log(TraceEntry{Iteration: iter, Role: "system", Content: "stuck detection triggered"})
-			return collectPartial(contextPulled, iter, true), nil
+			return collectPartial(model.ID, contextPulled, iter, true), nil
 		}
 
 		if totalTokens > model.TokenCeiling {
 			tracer.Log(TraceEntry{Iteration: iter, Role: "system", Content: fmt.Sprintf("token ceiling reached: %d", totalTokens)})
-			return collectPartial(contextPulled, iter, true), nil
+			return collectPartial(model.ID, contextPulled, iter, true), nil
 		}
 
 		messages = append(messages, chatMessage{Role: "assistant", Content: msg.Content, ToolCalls: msg.ToolCalls})
@@ -108,7 +108,7 @@ func runAgent(ctx context.Context, llm *LLMClient, model ModelDef, root, artifac
 		}
 	}
 
-	return collectPartial(contextPulled, maxIter, true), nil
+	return collectPartial(model.ID, contextPulled, maxIter, true), nil
 }
 
 func buildSystemPrompt(artifactPath, focus, root string) string {
@@ -191,6 +191,7 @@ func parseFinalResponse(ctx context.Context, llm *LLMClient, model ModelDef, mes
 			ContextPulled:  contextPulled,
 			IterationsUsed: iter,
 			Truncated:      false,
+			ModelUsed:      model.ID,
 		}, nil
 	}
 
@@ -230,6 +231,7 @@ func parseFinalResponse(ctx context.Context, llm *LLMClient, model ModelDef, mes
 				ContextPulled:  contextPulled,
 				IterationsUsed: iter,
 				Truncated:      false,
+				ModelUsed:      model.ID,
 			}, nil
 		}
 	}
@@ -237,12 +239,13 @@ func parseFinalResponse(ctx context.Context, llm *LLMClient, model ModelDef, mes
 	return nil, fmt.Errorf("failed to parse final output after repair attempts")
 }
 
-func collectPartial(contextPulled []string, iter int, truncated bool) *ReviewResult {
+func collectPartial(modelID string, contextPulled []string, iter int, truncated bool) *ReviewResult {
 	return &ReviewResult{
 		Findings:       []Finding{},
 		OpenQuestions:  []string{"review was truncated before completion"},
 		ContextPulled:  contextPulled,
 		IterationsUsed: iter,
 		Truncated:      truncated,
+		ModelUsed:      modelID,
 	}
 }
