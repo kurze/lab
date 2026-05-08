@@ -1,0 +1,39 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"os/exec"
+	"strings"
+)
+
+type Reviewer interface {
+	Review(ctx context.Context, workDir string, diff string) (*ReviewResult, error)
+}
+
+type CommandReviewer struct {
+	Command string
+}
+
+func (r *CommandReviewer) Review(ctx context.Context, workDir string, diff string) (*ReviewResult, error) {
+	cmd := exec.CommandContext(ctx, "sh", "-c", r.Command)
+	cmd.Dir = workDir
+	cmd.Stdin = strings.NewReader(diff)
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("review command failed: %w\nstderr: %s", err, stderr.String())
+	}
+
+	var result ReviewResult
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		return nil, fmt.Errorf("parse review output: %w\nraw output: %s", err, stdout.String())
+	}
+
+	return &result, nil
+}
