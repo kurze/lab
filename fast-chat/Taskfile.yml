@@ -152,6 +152,18 @@ tasks:
     cmds:
       - task: benchmark:quick
 
+  benchmark:validation:
+    desc: Validate chat functionality (JOIN, SEND, HISTORY, PING, broadcast)
+    deps: [build:go:benchmark]
+    cmds:
+      - ./bin/benchmark -scenario validation -cert certs/cert.pem
+
+  benchmark:validation:http3:
+    desc: Validate chat functionality via HTTP/3 WebTransport
+    deps: [build:go:benchmark]
+    cmds:
+      - ./bin/benchmark -scenario validation -protocol webtransport -cert certs/cert.pem
+
   benchmark:quick:
     desc: Run quick benchmark test (WebSocket, 50 clients, 10s)
     deps: [build:go:benchmark]
@@ -193,6 +205,12 @@ tasks:
     deps: [build:go:benchmark]
     cmds:
       - ./bin/benchmark -scenario burst -clients 100 -duration 30s -cert certs/cert.pem
+
+  benchmark:extreme:
+    desc: Extreme load test (500 clients, 20 msg/s base, surge/churn, 90s)
+    deps: [build:go:benchmark]
+    cmds:
+      - ./bin/benchmark -scenario extreme -clients 500 -rate 20 -duration 90s -cert certs/cert.pem
 
   # ============================================================================
   # Clean Tasks

@@ -44,20 +44,56 @@ openssl req -x509 -newkey rsa:4096 -keyout certs/key.pem -out certs/cert.pem \
   -days 365 -nodes -subj "/CN=chat.local"
 ```
 
-### 3. Build and run
+### 3. Configure (optional)
 
+Both servers use a compatible JSON config file:
+
+- **Go**: `go-config.json` (or creates default if missing)
+- **Rust**: `rust-config.json` (or creates default if missing)
+
+See `config.example.json` for all available options. Config files use nanosecond values for durations (compatible between Go and Rust).
+
+### 4. Build and run
+
+**Go server:**
 ```bash
-go build -o bin/server ./go/cmd/server
-./bin/server
+# Using Task (preferred)
+task build:go:server
+task dev:go
+
+# Or just run (builds automatically)
+task dev
+
+# Or manually
+go build -o bin/server-go ./go/cmd/server
+./bin/server-go
 ```
 
-### 4. Open in browser
+**Rust server:**
+```bash
+# Using Task (preferred)
+task build:rust
+task dev:rust
+
+# Or manually
+cd rust && cargo build --release
+./rust/target/release/fast-chat-server
+```
+
+**Build everything:**
+```bash
+task build              # Build both Go and Rust servers
+task build:go           # Build all Go binaries (server + benchmark)
+task build:rust         # Build Rust server (release mode)
+```
+
+### 5. Open in browser
 
 Navigate to: **https://chat.local:8443**
 
 You'll need to accept the self-signed certificate warning in your browser.
 
-### 5. Test with multiple tabs/browsers
+### 6. Test with multiple tabs/browsers
 
 Open multiple browser tabs or different browsers to see the real-time chat in action!
 
@@ -161,7 +197,23 @@ fast-chat/
 │   │       ├── webtransport.go # WebTransport handler
 │   │       └── favicon.go      # Favicon handler
 │   └── go.mod
-├── rust/                        # Rust implementation (planned)
+├── rust/                        # Rust implementation
+│   ├── src/
+│   │   ├── main.rs             # Server entry point
+│   │   ├── config.rs           # Configuration
+│   │   ├── chat/
+│   │   │   ├── mod.rs          # Chat module
+│   │   │   ├── state.rs        # In-memory state
+│   │   │   ├── message.rs      # Message types
+│   │   │   ├── connection.rs   # Connection management
+│   │   │   ├── nicknames.rs    # Nickname generator
+│   │   │   ├── logger.rs       # Message logger
+│   │   │   └── ringbuffer.rs   # Circular buffer
+│   │   └── handlers/
+│   │       ├── mod.rs          # Handler module
+│   │       ├── index.rs        # HTML serving
+│   │       └── websocket.rs    # WebSocket handler
+│   └── Cargo.toml
 ├── common/                      # Shared resources
 │   └── index.html              # Alternative HTML templates
 ├── certs/
@@ -170,17 +222,28 @@ fast-chat/
 ├── logs/
 │   └── messages.jsonl          # Message log file
 ├── bin/
-│   └── server                  # Compiled binary
+│   ├── server-go               # Compiled Go server
+│   ├── server-rust             # Compiled Rust server
+│   └── benchmark               # Benchmark tool
 └── README.md
 ```
 
 ## Technology Stack
 
+### Go Implementation
 - **Go 1.25.1+**
 - **quic-go** - QUIC/HTTP3 implementation
 - **webtransport-go** - WebTransport support
 - **gorilla/websocket** - WebSocket fallback
 - **google/uuid** - Connection IDs
+
+### Rust Implementation
+- **Rust 2021 edition**
+- **tokio** - Async runtime
+- **axum** - Web framework
+- **tokio-tungstenite** - WebSocket support
+- **hyper** - HTTP implementation
+- **parking_lot** - Fast synchronization primitives
 
 ## Testing
 
