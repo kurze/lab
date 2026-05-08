@@ -186,6 +186,9 @@ func ExecReadFile(root, path string, rangeStart, rangeEnd int) ToolResult {
 		if rangeStart > len(lines) {
 			return ToolResult{Content: fmt.Sprintf("start line %d exceeds file length %d", rangeStart, len(lines)), IsError: true}
 		}
+		if rangeStart > rangeEnd {
+			return ToolResult{Content: fmt.Sprintf("invalid range: start %d > end %d", rangeStart, rangeEnd), IsError: true}
+		}
 		lines = lines[rangeStart-1 : rangeEnd]
 	}
 
