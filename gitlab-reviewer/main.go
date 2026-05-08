@@ -13,7 +13,8 @@ import (
 
 func main() {
 	project := flag.String("project", "", "GitLab project path (group/project)")
-	dryRun := flag.Bool("dry-run", false, "show what would be reviewed without posting")
+	mrIID := flag.Int64("mr", 0, "review a single merge request by IID")
+	post := flag.Bool("post", false, "post findings as comments and add label (default: dry-run)")
 	configPath := flag.String("config", "", "path to config file")
 	repoPath := flag.String("repo", "", "path to local repo clone")
 	flag.Parse()
@@ -25,7 +26,7 @@ func main() {
 	if *repoPath != "" {
 		cfg.RepoPath = *repoPath
 	}
-	cfg.DryRun = *dryRun
+	cfg.DryRun = !*post
 
 	if err := cfg.Validate(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -35,12 +36,12 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
-	if err := run(ctx, cfg); err != nil {
+	if err := run(ctx, cfg, *mrIID); err != nil {
 		log.Fatalf("error: %v", err)
 	}
 }
 
-func run(ctx context.Context, cfg Config) error {
+func run(ctx context.Context, cfg Config, singleMR int64) error {
 	gl, err := NewGitLabClient(cfg)
 	if err != nil {
 		return fmt.Errorf("gitlab client: %w", err)
@@ -59,9 +60,18 @@ func run(ctx context.Context, cfg Config) error {
 		}
 	}
 
-	mrs, err := gl.ListUnreviewedMRs(ctx, cfg.ReviewLabel)
-	if err != nil {
-		return fmt.Errorf("list MRs: %w", err)
+	var mrs []MergeRequest
+	if singleMR > 0 {
+		mr, err := gl.GetMR(ctx, singleMR)
+		if err != nil {
+			return fmt.Errorf("get MR !%d: %w", singleMR, err)
+		}
+		mrs = []MergeRequest{mr}
+	} else {
+		mrs, err = gl.ListUnreviewedMRs(ctx, cfg.ReviewLabel)
+		if err != nil {
+			return fmt.Errorf("list MRs: %w", err)
+		}
 	}
 
 	if len(mrs) == 0 {
@@ -69,7 +79,7 @@ func run(ctx context.Context, cfg Config) error {
 		return nil
 	}
 
-	log.Printf("found %d unreviewed merge request(s)", len(mrs))
+	log.Printf("reviewing %d merge request(s)", len(mrs))
 
 	for _, mr := range mrs {
 		select {

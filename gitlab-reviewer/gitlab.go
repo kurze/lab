@@ -82,6 +82,18 @@ func (g *GitLabClient) PostComment(_ context.Context, mrIID int64, body string) 
 	return err
 }
 
+func (g *GitLabClient) GetMR(_ context.Context, mrIID int64) (MergeRequest, error) {
+	mr, _, err := g.client.MergeRequests.GetMergeRequest(g.project, mrIID, nil)
+	if err != nil {
+		return MergeRequest{}, err
+	}
+	return MergeRequest{
+		IID:    mr.IID,
+		Title:  mr.Title,
+		Labels: mr.Labels,
+	}, nil
+}
+
 func (g *GitLabClient) AddLabel(_ context.Context, mrIID int64, label string) error {
 	mr, _, err := g.client.MergeRequests.GetMergeRequest(g.project, mrIID, nil)
 	if err != nil {
