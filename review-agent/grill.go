@@ -24,6 +24,8 @@ func runGrill(ctx context.Context, llm *LLMClient, model ModelDef, root, artifac
 		return nil, err
 	}
 
+	defer lr.Tracer.Close()
+
 	if lr.Truncated {
 		return collectGrillPartial(model.ID, lr.ContextPulled, lr.Iteration, true), nil
 	}
@@ -75,14 +77,11 @@ func parseGrillOutput(ctx context.Context, llm *LLMClient, model ModelDef, lr *L
 		}, nil
 	}
 
-	tracer, _ := newTracer("repair-grill")
-	defer tracer.Close()
-
 	repaired, err := repairJSON[struct {
 		Questions []GrillQuestion `json:"questions"`
 	}](ctx, llm, model, lr.Messages, content, grillQuestionsJSONSchema, "grill_output",
 		"Your response was not valid JSON matching the required schema. Please output ONLY a JSON object with a 'questions' array. Each question needs 'question', 'why', and 'category' fields. No other text.",
-		tracer, lr.Iteration)
+		lr.Tracer, lr.Iteration)
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse grill output after repair attempts")

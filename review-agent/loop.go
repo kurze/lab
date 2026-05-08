@@ -16,11 +16,12 @@ type LoopConfig struct {
 }
 
 type LoopResult struct {
-	FinalMessage chatMessage
-	Messages     []chatMessage
+	FinalMessage  chatMessage
+	Messages      []chatMessage
 	ContextPulled []string
 	Iteration     int
 	Truncated     bool
+	Tracer        *Tracer
 }
 
 func runLoop(ctx context.Context, llm *LLMClient, cfg LoopConfig) (*LoopResult, error) {
@@ -33,7 +34,6 @@ func runLoop(ctx context.Context, llm *LLMClient, cfg LoopConfig) (*LoopResult, 
 	if err != nil {
 		return nil, fmt.Errorf("init tracer: %w", err)
 	}
-	defer tracer.Close()
 
 	ctx, cancel := context.WithTimeout(ctx, totalTimeout)
 	defer cancel()
@@ -65,7 +65,7 @@ func runLoop(ctx context.Context, llm *LLMClient, cfg LoopConfig) (*LoopResult, 
 		if err != nil {
 			tracer.Log(TraceEntry{Iteration: iter, Role: "error", Content: err.Error()})
 			if ctx.Err() != nil {
-				return &LoopResult{ContextPulled: contextPulled, Iteration: iter, Truncated: true}, nil
+				return &LoopResult{ContextPulled: contextPulled, Iteration: iter, Truncated: true, Tracer: tracer}, nil
 			}
 			return nil, fmt.Errorf("iteration %d: %w", iter, err)
 		}
@@ -84,6 +84,7 @@ func runLoop(ctx context.Context, llm *LLMClient, cfg LoopConfig) (*LoopResult, 
 				ContextPulled: contextPulled,
 				Iteration:     iter,
 				Truncated:     false,
+				Tracer:        tracer,
 			}, nil
 		}
 
@@ -97,12 +98,12 @@ func runLoop(ctx context.Context, llm *LLMClient, cfg LoopConfig) (*LoopResult, 
 
 		if stuckCount >= stuckThreshold {
 			tracer.Log(TraceEntry{Iteration: iter, Role: "system", Content: "stuck detection triggered"})
-			return &LoopResult{ContextPulled: contextPulled, Iteration: iter, Truncated: true}, nil
+			return &LoopResult{ContextPulled: contextPulled, Iteration: iter, Truncated: true, Tracer: tracer}, nil
 		}
 
 		if resp.Usage.TotalTokens > cfg.Model.TokenCeiling {
 			tracer.Log(TraceEntry{Iteration: iter, Role: "system", Content: fmt.Sprintf("token ceiling reached: %d", resp.Usage.TotalTokens)})
-			return &LoopResult{ContextPulled: contextPulled, Iteration: iter, Truncated: true}, nil
+			return &LoopResult{ContextPulled: contextPulled, Iteration: iter, Truncated: true, Tracer: tracer}, nil
 		}
 
 		messages = append(messages, chatMessage{Role: "assistant", Content: msg.Content, ToolCalls: msg.ToolCalls})
@@ -118,7 +119,7 @@ func runLoop(ctx context.Context, llm *LLMClient, cfg LoopConfig) (*LoopResult, 
 		}
 	}
 
-	return &LoopResult{ContextPulled: contextPulled, Iteration: maxIter, Truncated: true}, nil
+	return &LoopResult{ContextPulled: contextPulled, Iteration: maxIter, Truncated: true, Tracer: tracer}, nil
 }
 
 func repairJSON[T any](ctx context.Context, llm *LLMClient, model ModelDef, messages []chatMessage, content string, schema map[string]any, schemaName string, repairPrompt string, tracer *Tracer, iter int) (*T, error) {

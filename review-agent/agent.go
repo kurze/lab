@@ -50,6 +50,8 @@ func runAgent(ctx context.Context, llm *LLMClient, model ModelDef, root, artifac
 		return nil, err
 	}
 
+	defer lr.Tracer.Close()
+
 	if lr.Truncated {
 		return collectPartial(model.ID, lr.ContextPulled, lr.Iteration, true), nil
 	}
@@ -101,15 +103,12 @@ func parseReviewOutput(ctx context.Context, llm *LLMClient, model ModelDef, lr *
 		}, nil
 	}
 
-	tracer, _ := newTracer("repair-" + lr.Messages[0].Content[:20])
-	defer tracer.Close()
-
 	repaired, err := repairJSON[struct {
 		Findings     []Finding `json:"findings"`
 		OpenQuestions []string  `json:"open_questions"`
 	}](ctx, llm, model, lr.Messages, content, findingsJSONSchema, "review_output",
 		"Your response was not valid JSON matching the required schema. Please output ONLY a JSON object with 'findings' (array) and 'open_questions' (array). No other text.",
-		tracer, lr.Iteration)
+		lr.Tracer, lr.Iteration)
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse final output after repair attempts")
