@@ -12,9 +12,19 @@ import (
 	"strings"
 )
 
+const maxToolResultBytes = 32_000
+
 type ToolResult struct {
 	Content string `json:"content"`
 	IsError bool   `json:"is_error"`
+}
+
+func (r ToolResult) Truncated() ToolResult {
+	if len(r.Content) <= maxToolResultBytes {
+		return r
+	}
+	r.Content = r.Content[:maxToolResultBytes] + "\n... truncated at 32KB ..."
+	return r
 }
 
 func execReadFile(root, path string, rangeStart, rangeEnd int) ToolResult {
@@ -142,7 +152,7 @@ func dispatchTool(root string, tc llmTool, contextPulled *[]string) ToolResult {
 		if !result.IsError {
 			*contextPulled = append(*contextPulled, path)
 		}
-		return result
+		return result.Truncated()
 
 	case "grep":
 		pattern, _ := args["pattern"].(string)
@@ -152,7 +162,7 @@ func dispatchTool(root string, tc llmTool, contextPulled *[]string) ToolResult {
 		if !result.IsError {
 			*contextPulled = append(*contextPulled, fmt.Sprintf("grep:%s in %s", pattern, path))
 		}
-		return result
+		return result.Truncated()
 
 	case "list_dir":
 		path, _ := args["path"].(string)
@@ -160,7 +170,7 @@ func dispatchTool(root string, tc llmTool, contextPulled *[]string) ToolResult {
 		if !result.IsError {
 			*contextPulled = append(*contextPulled, fmt.Sprintf("ls:%s", path))
 		}
-		return result
+		return result.Truncated()
 
 	case "git_log":
 		count, _ := args["count"].(float64)
@@ -169,7 +179,7 @@ func dispatchTool(root string, tc llmTool, contextPulled *[]string) ToolResult {
 		if !result.IsError {
 			*contextPulled = append(*contextPulled, fmt.Sprintf("git_log:%s", ref))
 		}
-		return result
+		return result.Truncated()
 
 	default:
 		return ToolResult{Content: fmt.Sprintf("unknown tool: %s", tc.Function.Name), IsError: true}

@@ -36,7 +36,7 @@ func runDiffReview(ctx context.Context, llm *LLMClient, model ModelDef, root, di
 	defer lr.Tracer.Close()
 
 	if lr.Truncated {
-		return collectPartial(model.ID, lr.ContextPulled, lr.Iteration, true), nil
+		return collectPartial(model.ID, lr), nil
 	}
 
 	return parseReviewOutput(ctx, llm, model, lr)

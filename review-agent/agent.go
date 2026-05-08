@@ -53,7 +53,7 @@ func runAgent(ctx context.Context, llm *LLMClient, model ModelDef, root, artifac
 	defer lr.Tracer.Close()
 
 	if lr.Truncated {
-		return collectPartial(model.ID, lr.ContextPulled, lr.Iteration, true), nil
+		return collectPartial(model.ID, lr), nil
 	}
 
 	return parseReviewOutput(ctx, llm, model, lr)
@@ -100,14 +100,16 @@ func parseReviewOutput(ctx context.Context, llm *LLMClient, model ModelDef, lr *
 			ContextPulled:  lr.ContextPulled,
 			IterationsUsed: lr.Iteration,
 			ModelUsed:      model.ID,
+			ElapsedSec:    lr.ElapsedSec,
+			TokensUsed:    lr.TokensUsed,
 		}, nil
 	}
 
 	repaired, err := repairJSON[struct {
 		Findings     []Finding `json:"findings"`
 		OpenQuestions []string  `json:"open_questions"`
-	}](ctx, llm, model, lr.Messages, content, findingsJSONSchema, "review_output",
-		"Your response was not valid JSON matching the required schema. Please output ONLY a JSON object with 'findings' (array) and 'open_questions' (array). No other text.",
+	}](ctx, llm, model, lr.Messages, content,
+		"Your response was not valid JSON. Please output ONLY a JSON object with 'findings' (array of objects with category/severity/location/description/evidence) and 'open_questions' (array of strings). No markdown, no explanation, just the JSON.",
 		lr.Tracer, lr.Iteration)
 
 	if err != nil {
@@ -123,13 +125,15 @@ func parseReviewOutput(ctx context.Context, llm *LLMClient, model ModelDef, lr *
 	}, nil
 }
 
-func collectPartial(modelID string, contextPulled []string, iter int, truncated bool) *ReviewResult {
+func collectPartial(modelID string, lr *LoopResult) *ReviewResult {
 	return &ReviewResult{
 		Findings:       []Finding{},
 		OpenQuestions:  []string{"review was truncated before completion"},
-		ContextPulled:  contextPulled,
-		IterationsUsed: iter,
-		Truncated:      truncated,
+		ContextPulled:  lr.ContextPulled,
+		IterationsUsed: lr.Iteration,
+		Truncated:      true,
 		ModelUsed:      modelID,
+		ElapsedSec:     lr.ElapsedSec,
+		TokensUsed:     lr.TokensUsed,
 	}
 }

@@ -27,7 +27,7 @@ func runGrill(ctx context.Context, llm *LLMClient, model ModelDef, root, artifac
 	defer lr.Tracer.Close()
 
 	if lr.Truncated {
-		return collectGrillPartial(model.ID, lr.ContextPulled, lr.Iteration, true), nil
+		return collectGrillPartial(model.ID, lr), nil
 	}
 
 	return parseGrillOutput(ctx, llm, model, lr)
@@ -74,13 +74,15 @@ func parseGrillOutput(ctx context.Context, llm *LLMClient, model ModelDef, lr *L
 			ContextPulled:  lr.ContextPulled,
 			IterationsUsed: lr.Iteration,
 			ModelUsed:      model.ID,
+			ElapsedSec:    lr.ElapsedSec,
+			TokensUsed:    lr.TokensUsed,
 		}, nil
 	}
 
 	repaired, err := repairJSON[struct {
 		Questions []GrillQuestion `json:"questions"`
-	}](ctx, llm, model, lr.Messages, content, grillQuestionsJSONSchema, "grill_output",
-		"Your response was not valid JSON matching the required schema. Please output ONLY a JSON object with a 'questions' array. Each question needs 'question', 'why', and 'category' fields. No other text.",
+	}](ctx, llm, model, lr.Messages, content,
+		"Your response was not valid JSON. Please output ONLY a JSON object with a 'questions' array. Each question needs 'question' (string), 'why' (string), and 'category' (one of: assumption, gap, risk, ambiguity, dependency, tradeoff). No markdown, no explanation, just the JSON.",
 		lr.Tracer, lr.Iteration)
 
 	if err != nil {
@@ -95,12 +97,14 @@ func parseGrillOutput(ctx context.Context, llm *LLMClient, model ModelDef, lr *L
 	}, nil
 }
 
-func collectGrillPartial(modelID string, contextPulled []string, iter int, truncated bool) *GrillResult {
+func collectGrillPartial(modelID string, lr *LoopResult) *GrillResult {
 	return &GrillResult{
 		Questions:      []GrillQuestion{},
-		ContextPulled:  contextPulled,
-		IterationsUsed: iter,
-		Truncated:      truncated,
+		ContextPulled:  lr.ContextPulled,
+		IterationsUsed: lr.Iteration,
+		Truncated:      true,
 		ModelUsed:      modelID,
+		ElapsedSec:     lr.ElapsedSec,
+		TokensUsed:     lr.TokensUsed,
 	}
 }

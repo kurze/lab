@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
+	"time"
 )
 
 type LoopConfig struct {
@@ -22,18 +24,27 @@ type LoopResult struct {
 	Iteration     int
 	Truncated     bool
 	Tracer        *Tracer
+	ElapsedSec    float64
+	TokensUsed    int
 }
 
-func runLoop(ctx context.Context, llm *LLMClient, cfg LoopConfig) (*LoopResult, error) {
+func runLoop(ctx context.Context, llm *LLMClient, cfg LoopConfig) (lr *LoopResult, retErr error) {
 	maxIter := cfg.MaxIter
 	if maxIter <= 0 {
 		maxIter = defaultMaxIter
 	}
 
+	start := time.Now()
+
 	tracer, err := newTracer(cfg.TracerTag)
 	if err != nil {
 		return nil, fmt.Errorf("init tracer: %w", err)
 	}
+	defer func() {
+		if retErr != nil {
+			tracer.Close()
+		}
+	}()
 
 	ctx, cancel := context.WithTimeout(ctx, totalTimeout)
 	defer cancel()
@@ -48,6 +59,7 @@ func runLoop(ctx context.Context, llm *LLMClient, cfg LoopConfig) (*LoopResult, 
 	var contextPulled []string
 	var lastToolSig string
 	stuckCount := 0
+	lastTokens := 0
 
 	for iter := 1; iter <= maxIter; iter++ {
 		iterCtx, iterCancel := context.WithTimeout(ctx, perIterTimeout)
@@ -65,7 +77,8 @@ func runLoop(ctx context.Context, llm *LLMClient, cfg LoopConfig) (*LoopResult, 
 		if err != nil {
 			tracer.Log(TraceEntry{Iteration: iter, Role: "error", Content: err.Error()})
 			if ctx.Err() != nil {
-				return &LoopResult{ContextPulled: contextPulled, Iteration: iter, Truncated: true, Tracer: tracer}, nil
+				elapsed := time.Since(start).Seconds()
+				return &LoopResult{ContextPulled: contextPulled, Iteration: iter, Truncated: true, Tracer: tracer, ElapsedSec: elapsed, TokensUsed: lastTokens}, nil
 			}
 			return nil, fmt.Errorf("iteration %d: %w", iter, err)
 		}
@@ -74,10 +87,18 @@ func runLoop(ctx context.Context, llm *LLMClient, cfg LoopConfig) (*LoopResult, 
 			return nil, fmt.Errorf("iteration %d: empty response from LLM", iter)
 		}
 
+		lastTokens = resp.Usage.TotalTokens
 		msg := resp.Choices[0].Message
 		tracer.Log(TraceEntry{Iteration: iter, Role: "assistant", Content: msg.Content, ToolCalls: msg.ToolCalls})
 
 		if len(msg.ToolCalls) == 0 || resp.Choices[0].FinishReason == "stop" {
+			if strings.TrimSpace(msg.Content) == "" && iter < maxIter {
+				tracer.Log(TraceEntry{Iteration: iter, Role: "system", Content: "empty final response, nudging model"})
+				messages = append(messages, chatMessage{Role: "assistant", Content: msg.Content})
+				messages = append(messages, chatMessage{Role: "user", Content: "You stopped without producing output. Please produce your final JSON now."})
+				continue
+			}
+			elapsed := time.Since(start).Seconds()
 			return &LoopResult{
 				FinalMessage:  msg,
 				Messages:      messages,
@@ -85,6 +106,8 @@ func runLoop(ctx context.Context, llm *LLMClient, cfg LoopConfig) (*LoopResult, 
 				Iteration:     iter,
 				Truncated:     false,
 				Tracer:        tracer,
+				ElapsedSec:    elapsed,
+				TokensUsed:    lastTokens,
 			}, nil
 		}
 
@@ -98,12 +121,14 @@ func runLoop(ctx context.Context, llm *LLMClient, cfg LoopConfig) (*LoopResult, 
 
 		if stuckCount >= stuckThreshold {
 			tracer.Log(TraceEntry{Iteration: iter, Role: "system", Content: "stuck detection triggered"})
-			return &LoopResult{ContextPulled: contextPulled, Iteration: iter, Truncated: true, Tracer: tracer}, nil
+			elapsed := time.Since(start).Seconds()
+			return &LoopResult{ContextPulled: contextPulled, Iteration: iter, Truncated: true, Tracer: tracer, ElapsedSec: elapsed, TokensUsed: lastTokens}, nil
 		}
 
 		if resp.Usage.TotalTokens > cfg.Model.TokenCeiling {
 			tracer.Log(TraceEntry{Iteration: iter, Role: "system", Content: fmt.Sprintf("token ceiling reached: %d", resp.Usage.TotalTokens)})
-			return &LoopResult{ContextPulled: contextPulled, Iteration: iter, Truncated: true, Tracer: tracer}, nil
+			elapsed := time.Since(start).Seconds()
+			return &LoopResult{ContextPulled: contextPulled, Iteration: iter, Truncated: true, Tracer: tracer, ElapsedSec: elapsed, TokensUsed: lastTokens}, nil
 		}
 
 		messages = append(messages, chatMessage{Role: "assistant", Content: msg.Content, ToolCalls: msg.ToolCalls})
@@ -119,10 +144,11 @@ func runLoop(ctx context.Context, llm *LLMClient, cfg LoopConfig) (*LoopResult, 
 		}
 	}
 
-	return &LoopResult{ContextPulled: contextPulled, Iteration: maxIter, Truncated: true, Tracer: tracer}, nil
+	elapsed := time.Since(start).Seconds()
+	return &LoopResult{ContextPulled: contextPulled, Iteration: maxIter, Truncated: true, Tracer: tracer, ElapsedSec: elapsed, TokensUsed: lastTokens}, nil
 }
 
-func repairJSON[T any](ctx context.Context, llm *LLMClient, model ModelDef, messages []chatMessage, content string, schema map[string]any, schemaName string, repairPrompt string, tracer *Tracer, iter int) (*T, error) {
+func repairJSON[T any](ctx context.Context, llm *LLMClient, model ModelDef, messages []chatMessage, content string, repairPrompt string, tracer *Tracer, iter int) (*T, error) {
 	for attempt := 0; attempt < 2; attempt++ {
 		repairMessages := append(messages, chatMessage{Role: "assistant", Content: content})
 		repairMessages = append(repairMessages, chatMessage{
@@ -131,12 +157,8 @@ func repairJSON[T any](ctx context.Context, llm *LLMClient, model ModelDef, mess
 		})
 
 		req := chatRequest{
-			Model:    model.ID,
-			Messages: repairMessages,
-			ResponseFormat: map[string]any{
-				"type":        "json_schema",
-				"json_schema": map[string]any{"name": schemaName, "schema": schema},
-			},
+			Model:       model.ID,
+			Messages:    repairMessages,
 			Temperature: 0.1,
 		}
 
@@ -149,7 +171,7 @@ func repairJSON[T any](ctx context.Context, llm *LLMClient, model ModelDef, mess
 			continue
 		}
 
-		repaired := resp.Choices[0].Message.Content
+		repaired := extractJSON(resp.Choices[0].Message.Content)
 		tracer.Log(TraceEntry{Iteration: iter, Role: "repair", Content: repaired})
 
 		var result T
