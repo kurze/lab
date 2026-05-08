@@ -9,14 +9,23 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
+type LLMConfig struct {
+	URL          string  `toml:"url"`
+	Model        string  `toml:"model"`
+	ContextSize  int     `toml:"context_size"`
+	TokenCeiling int     `toml:"token_ceiling"`
+	Temperature  float64 `toml:"temperature"`
+}
+
 type Config struct {
-	GitLabURL     string `toml:"gitlab_url"`
-	Token         string `toml:"token"`
-	Project       string `toml:"project"`
-	ReviewLabel   string `toml:"review_label"`
-	ReviewCommand string `toml:"review_command"`
-	RepoPath      string `toml:"repo_path"`
-	DryRun        bool   `toml:"-"`
+	GitLabURL     string    `toml:"gitlab_url"`
+	Token         string    `toml:"token"`
+	Project       string    `toml:"project"`
+	ReviewLabel   string    `toml:"review_label"`
+	ReviewCommand string    `toml:"review_command"`
+	RepoPath      string    `toml:"repo_path"`
+	LLM           LLMConfig `toml:"llm"`
+	DryRun        bool      `toml:"-"`
 }
 
 func loadConfig(path string) Config {
@@ -24,6 +33,11 @@ func loadConfig(path string) Config {
 		GitLabURL:   "https://gitlab.com",
 		ReviewLabel: "ai-reviewed",
 		RepoPath:    ".",
+		LLM: LLMConfig{
+			ContextSize:  200_000,
+			TokenCeiling: 150_000,
+			Temperature:  0.3,
+		},
 	}
 
 	if path == "" {
@@ -53,6 +67,12 @@ func loadConfig(path string) Config {
 	if v := os.Getenv("GITLAB_REVIEWER_REPO_PATH"); v != "" {
 		cfg.RepoPath = v
 	}
+	if v := os.Getenv("GITLAB_REVIEWER_LLM_URL"); v != "" {
+		cfg.LLM.URL = v
+	}
+	if v := os.Getenv("GITLAB_REVIEWER_LLM_MODEL"); v != "" {
+		cfg.LLM.Model = v
+	}
 
 	return cfg
 }
@@ -64,8 +84,8 @@ func (c Config) Validate() error {
 	if c.Project == "" {
 		return fmt.Errorf("gitlab project required: set project in config or use --project flag")
 	}
-	if c.ReviewCommand == "" {
-		return fmt.Errorf("review command required: set review_command in config or GITLAB_REVIEWER_COMMAND env var")
+	if c.ReviewCommand == "" && c.LLM.URL == "" {
+		return fmt.Errorf("review engine required: set review_command or [llm] url in config")
 	}
 	return nil
 }

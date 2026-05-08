@@ -7,6 +7,8 @@ import (
 	"log"
 	"os"
 	"os/signal"
+
+	"github.com/kurze/lab/agentcore"
 )
 
 func main() {
@@ -44,7 +46,18 @@ func run(ctx context.Context, cfg Config) error {
 		return fmt.Errorf("gitlab client: %w", err)
 	}
 
-	reviewer := &CommandReviewer{Command: cfg.ReviewCommand}
+	var reviewer Reviewer
+	if cfg.ReviewCommand != "" {
+		reviewer = &CommandReviewer{Command: cfg.ReviewCommand}
+	} else {
+		reviewer = &LLMReviewer{
+			LLM:          agentcore.NewLLMClient(cfg.LLM.URL),
+			Model:        cfg.LLM.Model,
+			ContextSize:  cfg.LLM.ContextSize,
+			TokenCeiling: cfg.LLM.TokenCeiling,
+			Temperature:  cfg.LLM.Temperature,
+		}
+	}
 
 	mrs, err := gl.ListUnreviewedMRs(ctx, cfg.ReviewLabel)
 	if err != nil {
