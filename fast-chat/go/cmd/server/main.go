@@ -88,7 +88,7 @@ func main() {
 	originChecker := checkOrigin(config.Security.AllowedOrigins)
 
 	wtServer := &webtransport.Server{
-		H3: http3.Server{
+		H3: &http3.Server{
 			Addr:       config.Server.H3Addr,
 			TLSConfig:  tlsConfigH3,
 			QUICConfig: quicConfig,
