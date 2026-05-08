@@ -7,97 +7,28 @@ import (
 )
 
 func runGrill(ctx context.Context, llm *LLMClient, model ModelDef, root, artifactPath, focus string, maxIter int) (*GrillResult, error) {
-	if maxIter <= 0 {
-		maxIter = defaultMaxIter
-	}
-
-	tracer, err := newTracer("grill-" + artifactPath)
-	if err != nil {
-		return nil, fmt.Errorf("init tracer: %w", err)
-	}
-	defer tracer.Close()
-
-	ctx, cancel := context.WithTimeout(ctx, totalTimeout)
-	defer cancel()
-
 	systemPrompt := buildGrillSystemPrompt(artifactPath, focus, root)
 
-	messages := []chatMessage{
-		{Role: "system", Content: systemPrompt},
-		{Role: "user", Content: fmt.Sprintf("Read the artifact at %q and the surrounding workspace, then produce your toughest questions. Focus: %s", artifactPath, focus)},
+	lr, err := runLoop(ctx, llm, LoopConfig{
+		Model:       model,
+		Root:        root,
+		Temperature: 0.5,
+		MaxIter:     maxIter,
+		TracerTag:   "grill-" + artifactPath,
+		Messages: []chatMessage{
+			{Role: "system", Content: systemPrompt},
+			{Role: "user", Content: fmt.Sprintf("Read the artifact at %q and the surrounding workspace, then produce your toughest questions. Focus: %s", artifactPath, focus)},
+		},
+	})
+	if err != nil {
+		return nil, err
 	}
 
-	tracer.Log(TraceEntry{Iteration: 0, Role: "system", Content: systemPrompt})
-	tracer.Log(TraceEntry{Iteration: 0, Role: "user", Content: messages[1].Content})
-
-	var contextPulled []string
-	var lastToolSig string
-	stuckCount := 0
-
-	for iter := 1; iter <= maxIter; iter++ {
-		iterCtx, iterCancel := context.WithTimeout(ctx, perIterTimeout)
-
-		req := chatRequest{
-			Model:       model.ID,
-			Messages:    messages,
-			Tools:       agentTools,
-			Temperature: 0.5,
-		}
-
-		resp, err := llm.Chat(iterCtx, req)
-		iterCancel()
-
-		if err != nil {
-			tracer.Log(TraceEntry{Iteration: iter, Role: "error", Content: err.Error()})
-			if ctx.Err() != nil {
-				return collectGrillPartial(model.ID, contextPulled, iter, true), nil
-			}
-			return nil, fmt.Errorf("iteration %d: %w", iter, err)
-		}
-
-		if len(resp.Choices) == 0 {
-			return nil, fmt.Errorf("iteration %d: empty response from LLM", iter)
-		}
-
-		msg := resp.Choices[0].Message
-		tracer.Log(TraceEntry{Iteration: iter, Role: "assistant", Content: msg.Content, ToolCalls: msg.ToolCalls})
-
-		if len(msg.ToolCalls) == 0 || resp.Choices[0].FinishReason == "stop" {
-			return parseGrillResponse(ctx, llm, model, messages, msg, tracer, contextPulled, iter)
-		}
-
-		sig := toolCallSignature(msg.ToolCalls)
-		if sig == lastToolSig {
-			stuckCount++
-		} else {
-			stuckCount = 0
-		}
-		lastToolSig = sig
-
-		if stuckCount >= stuckThreshold {
-			tracer.Log(TraceEntry{Iteration: iter, Role: "system", Content: "stuck detection triggered"})
-			return collectGrillPartial(model.ID, contextPulled, iter, true), nil
-		}
-
-		if resp.Usage.TotalTokens > model.TokenCeiling {
-			tracer.Log(TraceEntry{Iteration: iter, Role: "system", Content: fmt.Sprintf("token ceiling reached: %d", resp.Usage.TotalTokens)})
-			return collectGrillPartial(model.ID, contextPulled, iter, true), nil
-		}
-
-		messages = append(messages, chatMessage{Role: "assistant", Content: msg.Content, ToolCalls: msg.ToolCalls})
-
-		for _, tc := range msg.ToolCalls {
-			result := dispatchTool(root, tc, &contextPulled)
-			tracer.Log(TraceEntry{Iteration: iter, Role: "tool", Content: result.Content, ToolResults: tc.ID})
-			messages = append(messages, chatMessage{
-				Role:       "tool",
-				Content:    result.Content,
-				ToolCallID: tc.ID,
-			})
-		}
+	if lr.Truncated {
+		return collectGrillPartial(model.ID, lr.ContextPulled, lr.Iteration, true), nil
 	}
 
-	return collectGrillPartial(model.ID, contextPulled, maxIter, true), nil
+	return parseGrillOutput(ctx, llm, model, lr)
 }
 
 func buildGrillSystemPrompt(artifactPath, focus, root string) string {
@@ -128,8 +59,8 @@ Rules:
 - Aim for 5-15 questions, ranked by importance.`, artifactPath, focus, root)
 }
 
-func parseGrillResponse(ctx context.Context, llm *LLMClient, model ModelDef, messages []chatMessage, msg chatMessage, tracer *Tracer, contextPulled []string, iter int) (*GrillResult, error) {
-	content := extractJSON(msg.Content)
+func parseGrillOutput(ctx context.Context, llm *LLMClient, model ModelDef, lr *LoopResult) (*GrillResult, error) {
+	content := extractJSON(lr.FinalMessage.Content)
 
 	var raw struct {
 		Questions []GrillQuestion `json:"questions"`
@@ -138,54 +69,31 @@ func parseGrillResponse(ctx context.Context, llm *LLMClient, model ModelDef, mes
 	if err := json.Unmarshal([]byte(content), &raw); err == nil && len(raw.Questions) > 0 {
 		return &GrillResult{
 			Questions:      raw.Questions,
-			ContextPulled:  contextPulled,
-			IterationsUsed: iter,
-			Truncated:      false,
+			ContextPulled:  lr.ContextPulled,
+			IterationsUsed: lr.Iteration,
 			ModelUsed:      model.ID,
 		}, nil
 	}
 
-	for attempt := 0; attempt < 2; attempt++ {
-		repairMessages := append(messages, chatMessage{Role: "assistant", Content: content})
-		repairMessages = append(repairMessages, chatMessage{
-			Role:    "user",
-			Content: "Your response was not valid JSON matching the required schema. Please output ONLY a JSON object with a 'questions' array. Each question needs 'question', 'why', and 'category' fields. No other text.",
-		})
+	tracer, _ := newTracer("repair-grill")
+	defer tracer.Close()
 
-		req := chatRequest{
-			Model:    model.ID,
-			Messages: repairMessages,
-			ResponseFormat: map[string]any{
-				"type":        "json_schema",
-				"json_schema": map[string]any{"name": "grill_output", "schema": grillQuestionsJSONSchema},
-			},
-			Temperature: 0.3,
-		}
+	repaired, err := repairJSON[struct {
+		Questions []GrillQuestion `json:"questions"`
+	}](ctx, llm, model, lr.Messages, content, grillQuestionsJSONSchema, "grill_output",
+		"Your response was not valid JSON matching the required schema. Please output ONLY a JSON object with a 'questions' array. Each question needs 'question', 'why', and 'category' fields. No other text.",
+		tracer, lr.Iteration)
 
-		resp, err := llm.Chat(ctx, req)
-		if err != nil {
-			tracer.Log(TraceEntry{Iteration: iter, Role: "error", Content: fmt.Sprintf("repair attempt %d: %s", attempt, err)})
-			continue
-		}
-		if len(resp.Choices) == 0 {
-			continue
-		}
-
-		repaired := resp.Choices[0].Message.Content
-		tracer.Log(TraceEntry{Iteration: iter, Role: "repair", Content: repaired})
-
-		if err := json.Unmarshal([]byte(repaired), &raw); err == nil && raw.Questions != nil {
-			return &GrillResult{
-				Questions:      raw.Questions,
-				ContextPulled:  contextPulled,
-				IterationsUsed: iter,
-				Truncated:      false,
-				ModelUsed:      model.ID,
-			}, nil
-		}
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse grill output after repair attempts")
 	}
 
-	return nil, fmt.Errorf("failed to parse grill output after repair attempts")
+	return &GrillResult{
+		Questions:      repaired.Questions,
+		ContextPulled:  lr.ContextPulled,
+		IterationsUsed: lr.Iteration,
+		ModelUsed:      model.ID,
+	}, nil
 }
 
 func collectGrillPartial(modelID string, contextPulled []string, iter int, truncated bool) *GrillResult {

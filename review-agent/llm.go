@@ -140,4 +140,18 @@ var agentTools = []any{
 			},
 		},
 	},
+	map[string]any{
+		"type": "function",
+		"function": map[string]any{
+			"name":        "git_log",
+			"description": "Show recent git commit history.",
+			"parameters": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"count": map[string]any{"type": "integer", "description": "Number of commits to show (default 10, max 50)"},
+					"ref":   map[string]any{"type": "string", "description": "Git ref to start from (e.g. HEAD, main). Optional."},
+				},
+			},
+		},
+	},
 }

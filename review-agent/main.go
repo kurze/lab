@@ -81,6 +81,32 @@ func main() {
 
 	s.AddTool(grillTool, handleGrill(cfg, llm))
 
+	diffTool := mcp.NewTool("diff_review",
+		mcp.WithDescription("Review a git diff using a local LLM. The model reads the diff and explores the workspace for context, then produces structured findings focused on the changes. Supports any git diff reference: HEAD (uncommitted), commit..commit ranges, or branch names."),
+		mcp.WithReadOnlyHintAnnotation(true),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithOpenWorldHintAnnotation(false),
+		mcp.WithString("workspace_root",
+			mcp.Description("Root directory of the git repository."),
+			mcp.Required(),
+		),
+		mcp.WithString("diff_ref",
+			mcp.Description("Git diff reference. Examples: 'HEAD' (uncommitted changes), 'HEAD~3..HEAD' (last 3 commits), 'main..feature-branch'. Default: HEAD."),
+		),
+		mcp.WithString("focus",
+			mcp.Description("Focus area for the review (e.g. 'error handling', 'security', 'correctness'). Default: general code review."),
+		),
+		mcp.WithString("model",
+			mcp.Description(fmt.Sprintf("Model to use. Available: %s. Default: %s.", strings.Join(modelNames, ", "), cfg.DefaultModel)),
+		),
+		mcp.WithNumber("max_iterations",
+			mcp.Description("Maximum agent iterations. Default 12."),
+		),
+	)
+
+	s.AddTool(diffTool, handleDiffReviewMCP(cfg, llm))
+
 	stdio := server.NewStdioServer(s)
 	if err := stdio.Listen(context.Background(), os.Stdin, os.Stdout); err != nil {
 		log.Fatal(err)
@@ -194,6 +220,59 @@ func handleGrill(cfg Config, llm *LLMClient) server.ToolHandlerFunc {
 		result, err := runGrill(ctx, llm, model, root, relArtifact, focus, maxIter)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("grill failed: %s", err)), nil
+		}
+
+		data, err := json.Marshal(result)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("marshal result: %s", err)), nil
+		}
+
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
+func handleDiffReviewMCP(cfg Config, llm *LLMClient) server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		args := req.GetArguments()
+
+		workspaceRoot, ok := args["workspace_root"].(string)
+		if !ok || workspaceRoot == "" {
+			return mcp.NewToolResultError("workspace_root is required"), nil
+		}
+
+		diffRef, _ := args["diff_ref"].(string)
+		ref := parseDiffRef(diffRef)
+		if ref == "" && diffRef != "" {
+			return mcp.NewToolResultError("invalid diff_ref: contains disallowed characters"), nil
+		}
+		if ref == "" {
+			ref = "HEAD"
+		}
+
+		focus, _ := args["focus"].(string)
+		if focus == "" {
+			focus = "general code review: correctness, error handling, edge cases, consistency"
+		}
+
+		modelName, _ := args["model"].(string)
+		model, err := cfg.ResolveModel(modelName)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		maxIter := defaultMaxIter
+		if v, ok := args["max_iterations"].(float64); ok && v > 0 {
+			maxIter = int(v)
+		}
+
+		root, err := canonicalRoot(workspaceRoot)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("invalid workspace root: %s", err)), nil
+		}
+
+		result, err := runDiffReview(ctx, llm, model, root, ref, focus, maxIter)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("diff review failed: %s", err)), nil
 		}
 
 		data, err := json.Marshal(result)

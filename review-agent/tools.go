@@ -2,10 +2,13 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -121,6 +124,89 @@ func execGrep(root, pattern, path, glob string) ToolResult {
 		return ToolResult{Content: "no matches found"}
 	}
 	return ToolResult{Content: strings.Join(matches, "\n")}
+}
+
+func dispatchTool(root string, tc llmTool, contextPulled *[]string) ToolResult {
+	var args map[string]any
+	if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
+		return ToolResult{Content: fmt.Sprintf("invalid arguments: %s", err), IsError: true}
+	}
+
+	var result ToolResult
+	switch tc.Function.Name {
+	case "read_file":
+		path, _ := args["path"].(string)
+		start, _ := args["start"].(float64)
+		end, _ := args["end"].(float64)
+		result = execReadFile(root, path, int(start), int(end))
+		if !result.IsError {
+			*contextPulled = append(*contextPulled, path)
+		}
+		return result
+
+	case "grep":
+		pattern, _ := args["pattern"].(string)
+		path, _ := args["path"].(string)
+		glob, _ := args["glob"].(string)
+		result = execGrep(root, pattern, path, glob)
+		if !result.IsError {
+			*contextPulled = append(*contextPulled, fmt.Sprintf("grep:%s in %s", pattern, path))
+		}
+		return result
+
+	case "list_dir":
+		path, _ := args["path"].(string)
+		result = execListDir(root, path)
+		if !result.IsError {
+			*contextPulled = append(*contextPulled, fmt.Sprintf("ls:%s", path))
+		}
+		return result
+
+	case "git_log":
+		count, _ := args["count"].(float64)
+		ref, _ := args["ref"].(string)
+		result = execGitLog(root, int(count), ref)
+		if !result.IsError {
+			*contextPulled = append(*contextPulled, fmt.Sprintf("git_log:%s", ref))
+		}
+		return result
+
+	default:
+		return ToolResult{Content: fmt.Sprintf("unknown tool: %s", tc.Function.Name), IsError: true}
+	}
+}
+
+func toolCallSignature(calls []llmTool) string {
+	parts := make([]string, len(calls))
+	for i, c := range calls {
+		parts[i] = c.Function.Name + ":" + c.Function.Arguments
+	}
+	sort.Strings(parts)
+	return strings.Join(parts, "|")
+}
+
+func execGitLog(root string, count int, ref string) ToolResult {
+	if count <= 0 || count > 50 {
+		count = 10
+	}
+	args := []string{"log", fmt.Sprintf("-%d", count), "--oneline", "--no-decorate"}
+	if ref != "" {
+		args = append(args, ref)
+	}
+
+	cmd := exec.Command("git", args...)
+	cmd.Dir = root
+	out, err := cmd.Output()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return ToolResult{Content: fmt.Sprintf("git log failed: %s", string(exitErr.Stderr)), IsError: true}
+		}
+		return ToolResult{Content: fmt.Sprintf("git log failed: %s", err), IsError: true}
+	}
+	if len(out) == 0 {
+		return ToolResult{Content: "no commits found"}
+	}
+	return ToolResult{Content: string(out)}
 }
 
 func execListDir(root, path string) ToolResult {
