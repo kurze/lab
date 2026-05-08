@@ -7,6 +7,20 @@ on:
     branches: [main]
 
 jobs:
+  agentcore:
+    name: agentcore
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: agentcore
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - run: go build ./...
+      - run: go vet ./...
+
   fast-chat-go:
     name: fast-chat (Go)
     runs-on: ubuntu-latest
