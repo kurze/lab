@@ -26,10 +26,11 @@ func extractJSON(s string) string {
 }
 
 const (
-	defaultMaxIter = 12
-	perIterTimeout = 5 * time.Minute
-	totalTimeout   = 20 * time.Minute
-	stuckThreshold = 3
+	defaultMaxIter    = 12
+	defaultMaxTokens  = 3000
+	perIterTimeout    = 5 * time.Minute
+	totalTimeout      = 20 * time.Minute
+	stuckThreshold    = 3
 )
 
 func runAgent(ctx context.Context, llm *LLMClient, model ModelDef, root, artifactPath, focus string, maxIter int) (*ReviewResult, error) {
@@ -40,7 +41,7 @@ func runAgent(ctx context.Context, llm *LLMClient, model ModelDef, root, artifac
 		Root:        root,
 		Temperature: 0.3,
 		MaxIter:     maxIter,
-		MaxTokens:   3000,
+		MaxTokens:   defaultMaxTokens,
 		TracerTag:   artifactPath,
 		Messages: []chatMessage{
 			{Role: "system", Content: systemPrompt},
@@ -95,7 +96,7 @@ func parseReviewOutput(ctx context.Context, llm *LLMClient, model ModelDef, lr *
 		OpenQuestions []string  `json:"open_questions"`
 	}
 
-	if err := json.Unmarshal([]byte(content), &raw); err == nil && len(raw.Findings) > 0 {
+	if err := json.Unmarshal([]byte(content), &raw); err == nil && raw.Findings != nil {
 		return &ReviewResult{
 			Findings:       raw.Findings,
 			OpenQuestions:  raw.OpenQuestions,

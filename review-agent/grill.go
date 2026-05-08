@@ -14,7 +14,7 @@ func runGrill(ctx context.Context, llm *LLMClient, model ModelDef, root, artifac
 		Root:        root,
 		Temperature: 0.5,
 		MaxIter:     maxIter,
-		MaxTokens:   3000,
+		MaxTokens:   defaultMaxTokens,
 		TracerTag:   "grill-" + artifactPath,
 		Messages: []chatMessage{
 			{Role: "system", Content: systemPrompt},
@@ -71,7 +71,7 @@ func parseGrillOutput(ctx context.Context, llm *LLMClient, model ModelDef, lr *L
 		Questions []GrillQuestion `json:"questions"`
 	}
 
-	if err := json.Unmarshal([]byte(content), &raw); err == nil && len(raw.Questions) > 0 {
+	if err := json.Unmarshal([]byte(content), &raw); err == nil && raw.Questions != nil {
 		return &GrillResult{
 			Questions:      raw.Questions,
 			ContextPulled:  lr.ContextPulled,

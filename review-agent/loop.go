@@ -151,10 +151,51 @@ func runLoop(ctx context.Context, llm *LLMClient, cfg LoopConfig) (lr *LoopResul
 				ToolCallID: tc.ID,
 			})
 		}
+
+		messages = compactMessages(messages, cfg.Model.ContextSize)
 	}
 
 	elapsed := time.Since(start).Seconds()
 	return &LoopResult{ContextPulled: contextPulled, Iteration: maxIter, Truncated: true, Tracer: tracer, ElapsedSec: elapsed, TokensUsed: lastTokens}, nil
+}
+
+func estimateTokens(messages []chatMessage) int {
+	total := 0
+	for _, m := range messages {
+		total += len(m.Content)
+		for _, tc := range m.ToolCalls {
+			total += len(tc.Function.Arguments)
+		}
+	}
+	return total / 4
+}
+
+func compactMessages(messages []chatMessage, contextSize int) []chatMessage {
+	threshold := contextSize * 3 / 4
+	if estimateTokens(messages) < threshold {
+		return messages
+	}
+
+	// Keep system + user (first 2) and the last 6 messages intact.
+	// Compress older tool results to a one-line summary.
+	protect := 6
+	if len(messages) <= 2+protect {
+		return messages
+	}
+
+	for i := 2; i < len(messages)-protect; i++ {
+		if messages[i].Role == "tool" && len(messages[i].Content) > 200 {
+			first := messages[i].Content
+			if nl := strings.Index(first, "\n"); nl > 0 {
+				first = first[:nl]
+			}
+			if len(first) > 200 {
+				first = first[:200]
+			}
+			messages[i].Content = first + "\n[compacted]"
+		}
+	}
+	return messages
 }
 
 func repairJSON[T any](ctx context.Context, llm *LLMClient, model ModelDef, messages []chatMessage, content string, repairPrompt string, tracer *Tracer, iter int) (*T, error) {

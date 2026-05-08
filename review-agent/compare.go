@@ -32,7 +32,7 @@ func runCompare(ctx context.Context, llm *LLMClient, model ModelDef, root, oldPa
 		Root:        root,
 		Temperature: 0.3,
 		MaxIter:     maxIter,
-		MaxTokens:   3000,
+		MaxTokens:   defaultMaxTokens,
 		TracerTag:   "compare-" + sanitizeTracerTag(newPath),
 		Messages: []chatMessage{
 			{Role: "system", Content: systemPrompt},
@@ -98,7 +98,7 @@ func parseCompareOutput(ctx context.Context, llm *LLMClient, model ModelDef, lr 
 		OpenQuestions []string            `json:"open_questions"`
 	}
 
-	if err := json.Unmarshal([]byte(content), &raw); err == nil && len(raw.Findings) > 0 {
+	if err := json.Unmarshal([]byte(content), &raw); err == nil && raw.Findings != nil {
 		return &CompareResult{
 			Findings:       raw.Findings,
 			OpenQuestions:   raw.OpenQuestions,

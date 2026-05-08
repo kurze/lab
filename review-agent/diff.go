@@ -23,7 +23,7 @@ func runDiffReview(ctx context.Context, llm *LLMClient, model ModelDef, root, di
 		Root:        root,
 		Temperature: 0.3,
 		MaxIter:     maxIter,
-		MaxTokens:   3000,
+		MaxTokens:   defaultMaxTokens,
 		TracerTag:   "diff-" + sanitizeTracerTag(diffRef),
 		Messages: []chatMessage{
 			{Role: "system", Content: systemPrompt},
