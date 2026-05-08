@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"regexp"
 	"strings"
 )
 
@@ -74,7 +75,7 @@ Rules:
 }
 
 func gitDiff(root, ref string) (string, error) {
-	var args []string
+	var args []string //nolint:prealloc // assigned per-case, not appended
 	switch {
 	case ref == "" || ref == "HEAD":
 		args = []string{"diff", "HEAD"}
@@ -109,15 +110,14 @@ func sanitizeTracerTag(s string) string {
 	return r.Replace(s)
 }
 
+var validDiffRef = regexp.MustCompile(`^[a-zA-Z0-9./_\-~^]+$`)
+
 func parseDiffRef(ref string) string {
 	if ref == "" {
 		return "HEAD"
 	}
-	for _, c := range ref {
-		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
-			c == '.' || c == '/' || c == '-' || c == '_' || c == '~' || c == '^') {
-			return ""
-		}
+	if !validDiffRef.MatchString(ref) {
+		return ""
 	}
 	return ref
 }
