@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 
 	"github.com/kurze/lab/agentcore"
 )
@@ -33,7 +34,7 @@ func (r *LLMReviewer) Review(ctx context.Context, workDir string, diff string) (
 		Root:           workDir,
 		Temperature:    temp,
 		MaxIter:        12,
-		MaxTokens:      3000,
+		MaxTokens:      8000,
 		AgentName:      agentName,
 		TracerTag:      "mr-review",
 		Tools:          agentcore.StandardToolDefs(),
@@ -91,8 +92,46 @@ func parseLLMOutput(lr *agentcore.LoopResult) (*ReviewResult, error) {
 	content := agentcore.ExtractJSON(lr.FinalMessage.Content)
 
 	var result ReviewResult
-	if err := json.Unmarshal([]byte(content), &result); err != nil {
-		return nil, fmt.Errorf("parse review output: %w\nraw: %s", err, content)
+	if err := json.Unmarshal([]byte(content), &result); err == nil {
+		return &result, nil
 	}
-	return &result, nil
+
+	// Output may be truncated — salvage complete findings
+	result.Findings = salvageFindings(content)
+	if len(result.Findings) > 0 {
+		log.Printf("warning: output was truncated, salvaged %d complete finding(s)", len(result.Findings))
+		return &result, nil
+	}
+
+	return nil, fmt.Errorf("parse review output: no valid findings in truncated response")
+}
+
+func salvageFindings(content string) []Finding {
+	// Find each complete JSON object in the findings array
+	var findings []Finding
+	depth := 0
+	start := -1
+	for i, c := range content {
+		switch c {
+		case '{':
+			if depth == 0 {
+				start = i
+			}
+			depth++
+		case '}':
+			depth--
+			if depth == 0 && start >= 0 {
+				var f Finding
+				if err := json.Unmarshal([]byte(content[start:i+1]), &f); err == nil && f.Description != "" {
+					findings = append(findings, f)
+				}
+				start = -1
+			}
+		}
+	}
+	// Skip the first match — it's the outer {"findings": ...} wrapper
+	if len(findings) > 1 {
+		return findings[1:]
+	}
+	return nil
 }
