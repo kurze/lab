@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+
+	"github.com/kurze/lab/agentcore"
 )
 
 type ComparisonFinding struct {
@@ -24,17 +26,22 @@ type CompareResult struct {
 	TokensUsed     int                 `json:"tokens_used"`
 }
 
-func runCompare(ctx context.Context, llm *LLMClient, model ModelDef, root, oldPath, newPath, focus string, maxIter int) (*CompareResult, error) {
+func runCompare(ctx context.Context, llm *agentcore.LLMClient, model ModelDef, root, oldPath, newPath, focus string, maxIter int) (*CompareResult, error) {
 	systemPrompt := buildCompareSystemPrompt(oldPath, newPath, focus, root)
 
-	lr, err := runLoop(ctx, llm, LoopConfig{
-		Model:       model,
-		Root:        root,
-		Temperature: 0.3,
-		MaxIter:     maxIter,
-		MaxTokens:   defaultMaxTokens,
-		TracerTag:   "compare-" + sanitizeTracerTag(newPath),
-		Messages: []chatMessage{
+	lr, err := agentcore.RunLoop(ctx, llm, agentcore.LoopConfig{
+		ModelID:        model.ID,
+		ContextSize:    model.ContextSize,
+		TokenCeiling:   model.TokenCeiling,
+		Root:           root,
+		Temperature:    0.3,
+		MaxIter:        maxIter,
+		MaxTokens:      defaultMaxTokens,
+		AgentName:      agentName,
+		TracerTag:      "compare-" + sanitizeTracerTag(newPath),
+		Tools:          agentcore.StandardToolDefs(),
+		ToolDispatcher: agentcore.StandardToolDispatch,
+		Messages: []agentcore.ChatMessage{
 			{Role: "system", Content: systemPrompt},
 			{Role: "user", Content: fmt.Sprintf("Compare the old version at %q with the new version at %q. Focus: %s\n\nRead both files, explore the workspace for context, then produce your findings about what the changes mean.", oldPath, newPath, focus)},
 		},
@@ -90,12 +97,12 @@ Rules:
 - When done exploring, output ONLY your JSON.`, oldPath, newPath, focus, root)
 }
 
-func parseCompareOutput(ctx context.Context, llm *LLMClient, model ModelDef, lr *LoopResult) (*CompareResult, error) {
-	content := extractJSON(lr.FinalMessage.Content)
+func parseCompareOutput(ctx context.Context, llm *agentcore.LLMClient, model ModelDef, lr *agentcore.LoopResult) (*CompareResult, error) {
+	content := agentcore.ExtractJSON(lr.FinalMessage.Content)
 
 	var raw struct {
-		Findings      []ComparisonFinding `json:"findings"`
-		OpenQuestions []string            `json:"open_questions"`
+		Findings     []ComparisonFinding `json:"findings"`
+		OpenQuestions []string           `json:"open_questions"`
 	}
 
 	if err := json.Unmarshal([]byte(content), &raw); err == nil && raw.Findings != nil {
@@ -110,10 +117,10 @@ func parseCompareOutput(ctx context.Context, llm *LLMClient, model ModelDef, lr 
 		}, nil
 	}
 
-	repaired, err := repairJSON[struct {
-		Findings      []ComparisonFinding `json:"findings"`
-		OpenQuestions []string            `json:"open_questions"`
-	}](ctx, llm, model, lr.Messages, content,
+	repaired, err := agentcore.RepairJSON[struct {
+		Findings     []ComparisonFinding `json:"findings"`
+		OpenQuestions []string           `json:"open_questions"`
+	}](ctx, llm, model.ID, lr.Messages, content,
 		"Your response was not valid JSON. Please output ONLY a JSON object with 'findings' (array of objects with category/section/description/impact) and 'open_questions' (array of strings). No markdown, no explanation, just the JSON.",
 		lr.Tracer, lr.Iteration)
 

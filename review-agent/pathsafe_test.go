@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/kurze/lab/agentcore"
 )
 
 func TestSafePath(t *testing.T) {
@@ -29,7 +31,7 @@ func TestSafePath(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := safePath(root, tt.path)
+			_, err := agentcore.SafePath(root, tt.path)
 			if tt.wantErr && err == nil {
 				t.Error("expected error, got nil")
 			}
@@ -50,7 +52,7 @@ func TestSafePathSymlinkEscape(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := safePath(root, "escape/secret.txt")
+	_, err := agentcore.SafePath(root, "escape/secret.txt")
 	if err == nil {
 		t.Error("expected error for symlink escape, got nil")
 	}

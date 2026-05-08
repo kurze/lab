@@ -9,13 +9,14 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/kurze/lab/agentcore"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 )
 
 func main() {
 	cfg := loadConfig()
-	llm := newLLMClient(cfg)
+	llm := agentcore.NewLLMClient(cfg.LLMURL)
 
 	s := server.NewMCPServer(
 		"wlx-review-agent",
@@ -144,7 +145,7 @@ func main() {
 	}
 }
 
-func handleReview(cfg Config, llm *LLMClient) server.ToolHandlerFunc {
+func handleReview(cfg Config, llm *agentcore.LLMClient) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args := req.GetArguments()
 
@@ -174,7 +175,7 @@ func handleReview(cfg Config, llm *LLMClient) server.ToolHandlerFunc {
 			maxIter = int(v)
 		}
 
-		root, err := canonicalRoot(workspaceRoot)
+		root, err := agentcore.CanonicalRoot(workspaceRoot)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("invalid workspace root: %s", err)), nil
 		}
@@ -203,7 +204,7 @@ func handleReview(cfg Config, llm *LLMClient) server.ToolHandlerFunc {
 	}
 }
 
-func handleGrill(cfg Config, llm *LLMClient) server.ToolHandlerFunc {
+func handleGrill(cfg Config, llm *agentcore.LLMClient) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args := req.GetArguments()
 
@@ -233,7 +234,7 @@ func handleGrill(cfg Config, llm *LLMClient) server.ToolHandlerFunc {
 			maxIter = int(v)
 		}
 
-		root, err := canonicalRoot(workspaceRoot)
+		root, err := agentcore.CanonicalRoot(workspaceRoot)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("invalid workspace root: %s", err)), nil
 		}
@@ -262,7 +263,7 @@ func handleGrill(cfg Config, llm *LLMClient) server.ToolHandlerFunc {
 	}
 }
 
-func handleCompare(cfg Config, llm *LLMClient) server.ToolHandlerFunc {
+func handleCompare(cfg Config, llm *agentcore.LLMClient) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args := req.GetArguments()
 
@@ -297,7 +298,7 @@ func handleCompare(cfg Config, llm *LLMClient) server.ToolHandlerFunc {
 			maxIter = int(v)
 		}
 
-		root, err := canonicalRoot(workspaceRoot)
+		root, err := agentcore.CanonicalRoot(workspaceRoot)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("invalid workspace root: %s", err)), nil
 		}
@@ -334,7 +335,7 @@ func handleCompare(cfg Config, llm *LLMClient) server.ToolHandlerFunc {
 	}
 }
 
-func handleDiffReviewMCP(cfg Config, llm *LLMClient) server.ToolHandlerFunc {
+func handleDiffReviewMCP(cfg Config, llm *agentcore.LLMClient) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args := req.GetArguments()
 
@@ -368,7 +369,7 @@ func handleDiffReviewMCP(cfg Config, llm *LLMClient) server.ToolHandlerFunc {
 			maxIter = int(v)
 		}
 
-		root, err := canonicalRoot(workspaceRoot)
+		root, err := agentcore.CanonicalRoot(workspaceRoot)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("invalid workspace root: %s", err)), nil
 		}

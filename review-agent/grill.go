@@ -4,19 +4,26 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+
+	"github.com/kurze/lab/agentcore"
 )
 
-func runGrill(ctx context.Context, llm *LLMClient, model ModelDef, root, artifactPath, focus string, maxIter int) (*GrillResult, error) {
+func runGrill(ctx context.Context, llm *agentcore.LLMClient, model ModelDef, root, artifactPath, focus string, maxIter int) (*GrillResult, error) {
 	systemPrompt := buildGrillSystemPrompt(artifactPath, focus, root)
 
-	lr, err := runLoop(ctx, llm, LoopConfig{
-		Model:       model,
-		Root:        root,
-		Temperature: 0.5,
-		MaxIter:     maxIter,
-		MaxTokens:   defaultMaxTokens,
-		TracerTag:   "grill-" + artifactPath,
-		Messages: []chatMessage{
+	lr, err := agentcore.RunLoop(ctx, llm, agentcore.LoopConfig{
+		ModelID:        model.ID,
+		ContextSize:    model.ContextSize,
+		TokenCeiling:   model.TokenCeiling,
+		Root:           root,
+		Temperature:    0.5,
+		MaxIter:        maxIter,
+		MaxTokens:      defaultMaxTokens,
+		AgentName:      agentName,
+		TracerTag:      "grill-" + artifactPath,
+		Tools:          agentcore.StandardToolDefs(),
+		ToolDispatcher: agentcore.StandardToolDispatch,
+		Messages: []agentcore.ChatMessage{
 			{Role: "system", Content: systemPrompt},
 			{Role: "user", Content: fmt.Sprintf("Read the artifact at %q and the surrounding workspace, then produce your toughest questions. Focus: %s", artifactPath, focus)},
 		},
@@ -64,8 +71,8 @@ Rules:
 - When ready, output ONLY your JSON. No other text.`, artifactPath, focus, root)
 }
 
-func parseGrillOutput(ctx context.Context, llm *LLMClient, model ModelDef, lr *LoopResult) (*GrillResult, error) {
-	content := extractJSON(lr.FinalMessage.Content)
+func parseGrillOutput(ctx context.Context, llm *agentcore.LLMClient, model ModelDef, lr *agentcore.LoopResult) (*GrillResult, error) {
+	content := agentcore.ExtractJSON(lr.FinalMessage.Content)
 
 	var raw struct {
 		Questions []GrillQuestion `json:"questions"`
@@ -82,9 +89,9 @@ func parseGrillOutput(ctx context.Context, llm *LLMClient, model ModelDef, lr *L
 		}, nil
 	}
 
-	repaired, err := repairJSON[struct {
+	repaired, err := agentcore.RepairJSON[struct {
 		Questions []GrillQuestion `json:"questions"`
-	}](ctx, llm, model, lr.Messages, content,
+	}](ctx, llm, model.ID, lr.Messages, content,
 		"Your response was not valid JSON. Please output ONLY a JSON object with a 'questions' array. Each question needs 'question' (string), 'why' (string), and 'category' (one of: assumption, gap, risk, ambiguity, dependency, tradeoff). No markdown, no explanation, just the JSON.",
 		lr.Tracer, lr.Iteration)
 
@@ -100,7 +107,7 @@ func parseGrillOutput(ctx context.Context, llm *LLMClient, model ModelDef, lr *L
 	}, nil
 }
 
-func collectGrillPartial(modelID string, lr *LoopResult) *GrillResult {
+func collectGrillPartial(modelID string, lr *agentcore.LoopResult) *GrillResult {
 	return &GrillResult{
 		Questions:      []GrillQuestion{},
 		ContextPulled:  lr.ContextPulled,

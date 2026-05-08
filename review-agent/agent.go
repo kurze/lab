@@ -4,46 +4,32 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"regexp"
-	"strings"
-	"time"
+
+	"github.com/kurze/lab/agentcore"
 )
-
-var codeBlockRe = regexp.MustCompile("(?s)```(?:json)?\\s*\n?(.*?)\\s*```")
-
-func extractJSON(s string) string {
-	s = strings.TrimSpace(s)
-	if strings.HasPrefix(s, "{") {
-		return s
-	}
-	if m := codeBlockRe.FindStringSubmatch(s); len(m) > 1 {
-		return strings.TrimSpace(m[1])
-	}
-	if start := strings.Index(s, "{"); start >= 0 {
-		return s[start:]
-	}
-	return s
-}
 
 const (
 	defaultMaxIter   = 12
 	defaultMaxTokens = 3000
-	perIterTimeout   = 5 * time.Minute
-	totalTimeout     = 20 * time.Minute
-	stuckThreshold   = 3
+	agentName        = "wlx-review-agent"
 )
 
-func runAgent(ctx context.Context, llm *LLMClient, model ModelDef, root, artifactPath, focus string, maxIter int) (*ReviewResult, error) {
+func runAgent(ctx context.Context, llm *agentcore.LLMClient, model ModelDef, root, artifactPath, focus string, maxIter int) (*ReviewResult, error) {
 	systemPrompt := buildSystemPrompt(artifactPath, focus, root)
 
-	lr, err := runLoop(ctx, llm, LoopConfig{
-		Model:       model,
-		Root:        root,
-		Temperature: 0.3,
-		MaxIter:     maxIter,
-		MaxTokens:   defaultMaxTokens,
-		TracerTag:   artifactPath,
-		Messages: []chatMessage{
+	lr, err := agentcore.RunLoop(ctx, llm, agentcore.LoopConfig{
+		ModelID:        model.ID,
+		ContextSize:    model.ContextSize,
+		TokenCeiling:   model.TokenCeiling,
+		Root:           root,
+		Temperature:    0.3,
+		MaxIter:        maxIter,
+		MaxTokens:      defaultMaxTokens,
+		AgentName:      agentName,
+		TracerTag:      artifactPath,
+		Tools:          agentcore.StandardToolDefs(),
+		ToolDispatcher: agentcore.StandardToolDispatch,
+		Messages: []agentcore.ChatMessage{
 			{Role: "system", Content: systemPrompt},
 			{Role: "user", Content: fmt.Sprintf("Review the artifact at %q with focus: %s\n\nStart by reading the artifact, then explore the workspace as needed to build context. When you have enough information, produce your final findings.", artifactPath, focus)},
 		},
@@ -88,12 +74,12 @@ Rules:
 - When you are done exploring, stop calling tools and output ONLY your JSON.`, artifactPath, focus, root)
 }
 
-func parseReviewOutput(ctx context.Context, llm *LLMClient, model ModelDef, lr *LoopResult) (*ReviewResult, error) {
-	content := extractJSON(lr.FinalMessage.Content)
+func parseReviewOutput(ctx context.Context, llm *agentcore.LLMClient, model ModelDef, lr *agentcore.LoopResult) (*ReviewResult, error) {
+	content := agentcore.ExtractJSON(lr.FinalMessage.Content)
 
 	var raw struct {
-		Findings      []Finding `json:"findings"`
-		OpenQuestions []string  `json:"open_questions"`
+		Findings     []Finding `json:"findings"`
+		OpenQuestions []string `json:"open_questions"`
 	}
 
 	if err := json.Unmarshal([]byte(content), &raw); err == nil && raw.Findings != nil {
@@ -108,10 +94,10 @@ func parseReviewOutput(ctx context.Context, llm *LLMClient, model ModelDef, lr *
 		}, nil
 	}
 
-	repaired, err := repairJSON[struct {
-		Findings      []Finding `json:"findings"`
-		OpenQuestions []string  `json:"open_questions"`
-	}](ctx, llm, model, lr.Messages, content,
+	repaired, err := agentcore.RepairJSON[struct {
+		Findings     []Finding `json:"findings"`
+		OpenQuestions []string `json:"open_questions"`
+	}](ctx, llm, model.ID, lr.Messages, content,
 		"Your response was not valid JSON. Please output ONLY a JSON object with 'findings' (array of objects with category/severity/location/description/evidence) and 'open_questions' (array of strings). No markdown, no explanation, just the JSON.",
 		lr.Tracer, lr.Iteration)
 
@@ -128,7 +114,7 @@ func parseReviewOutput(ctx context.Context, llm *LLMClient, model ModelDef, lr *
 	}, nil
 }
 
-func collectPartial(modelID string, lr *LoopResult) *ReviewResult {
+func collectPartial(modelID string, lr *agentcore.LoopResult) *ReviewResult {
 	return &ReviewResult{
 		Findings:       []Finding{},
 		OpenQuestions:  []string{"review was truncated before completion"},

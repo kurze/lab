@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/kurze/lab/agentcore"
 )
 
 func setupWorkspace(t *testing.T) string {
@@ -25,7 +27,7 @@ func setupWorkspace(t *testing.T) string {
 func TestExecReadFile(t *testing.T) {
 	root := setupWorkspace(t)
 
-	r := execReadFile(root, "docs/adr.md", 0, 0)
+	r := agentcore.ExecReadFile(root, "docs/adr.md", 0, 0)
 	if r.IsError {
 		t.Fatalf("unexpected error: %s", r.Content)
 	}
@@ -37,7 +39,7 @@ func TestExecReadFile(t *testing.T) {
 func TestExecReadFileRange(t *testing.T) {
 	root := setupWorkspace(t)
 
-	r := execReadFile(root, "docs/adr.md", 2, 3)
+	r := agentcore.ExecReadFile(root, "docs/adr.md", 2, 3)
 	if r.IsError {
 		t.Fatalf("unexpected error: %s", r.Content)
 	}
@@ -52,7 +54,7 @@ func TestExecReadFileRange(t *testing.T) {
 func TestExecReadFileTraversal(t *testing.T) {
 	root := setupWorkspace(t)
 
-	r := execReadFile(root, "../../etc/passwd", 0, 0)
+	r := agentcore.ExecReadFile(root, "../../etc/passwd", 0, 0)
 	if !r.IsError {
 		t.Error("expected error for path traversal")
 	}
@@ -61,7 +63,7 @@ func TestExecReadFileTraversal(t *testing.T) {
 func TestExecGrep(t *testing.T) {
 	root := setupWorkspace(t)
 
-	r := execGrep(root, "portability", ".", "")
+	r := agentcore.ExecGrep(root, "portability", ".", "")
 	if r.IsError {
 		t.Fatalf("unexpected error: %s", r.Content)
 	}
@@ -73,7 +75,7 @@ func TestExecGrep(t *testing.T) {
 func TestExecGrepWithGlob(t *testing.T) {
 	root := setupWorkspace(t)
 
-	r := execGrep(root, "func", ".", "*.go")
+	r := agentcore.ExecGrep(root, "func", ".", "*.go")
 	if r.IsError {
 		t.Fatalf("unexpected error: %s", r.Content)
 	}
@@ -85,7 +87,7 @@ func TestExecGrepWithGlob(t *testing.T) {
 func TestExecListDir(t *testing.T) {
 	root := setupWorkspace(t)
 
-	r := execListDir(root, ".")
+	r := agentcore.ExecListDir(root, ".")
 	if r.IsError {
 		t.Fatalf("unexpected error: %s", r.Content)
 	}

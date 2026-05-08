@@ -4,6 +4,7 @@ go 1.26.3
 
 require (
 	github.com/BurntSushi/toml v1.6.0
+	github.com/kurze/lab/agentcore v0.0.0
 	github.com/mark3labs/mcp-go v0.52.0
 )
 
@@ -15,3 +16,5 @@ require (
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	golang.org/x/text v0.14.0 // indirect
 )
+
+replace github.com/kurze/lab/agentcore => ../agentcore

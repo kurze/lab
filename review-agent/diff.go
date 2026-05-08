@@ -6,9 +6,11 @@ import (
 	"os/exec"
 	"regexp"
 	"strings"
+
+	"github.com/kurze/lab/agentcore"
 )
 
-func runDiffReview(ctx context.Context, llm *LLMClient, model ModelDef, root, diffRef, focus string, maxIter int) (*ReviewResult, error) {
+func runDiffReview(ctx context.Context, llm *agentcore.LLMClient, model ModelDef, root, diffRef, focus string, maxIter int) (*ReviewResult, error) {
 	diff, err := gitDiff(root, diffRef)
 	if err != nil {
 		return nil, fmt.Errorf("git diff: %w", err)
@@ -19,14 +21,19 @@ func runDiffReview(ctx context.Context, llm *LLMClient, model ModelDef, root, di
 
 	systemPrompt := buildDiffSystemPrompt(diffRef, focus, root)
 
-	lr, err := runLoop(ctx, llm, LoopConfig{
-		Model:       model,
-		Root:        root,
-		Temperature: 0.3,
-		MaxIter:     maxIter,
-		MaxTokens:   defaultMaxTokens,
-		TracerTag:   "diff-" + sanitizeTracerTag(diffRef),
-		Messages: []chatMessage{
+	lr, err := agentcore.RunLoop(ctx, llm, agentcore.LoopConfig{
+		ModelID:        model.ID,
+		ContextSize:    model.ContextSize,
+		TokenCeiling:   model.TokenCeiling,
+		Root:           root,
+		Temperature:    0.3,
+		MaxIter:        maxIter,
+		MaxTokens:      defaultMaxTokens,
+		AgentName:      agentName,
+		TracerTag:      "diff-" + sanitizeTracerTag(diffRef),
+		Tools:          agentcore.StandardToolDefs(),
+		ToolDispatcher: agentcore.StandardToolDispatch,
+		Messages: []agentcore.ChatMessage{
 			{Role: "system", Content: systemPrompt},
 			{Role: "user", Content: fmt.Sprintf("Here is the diff to review:\n\n```diff\n%s\n```\n\nFocus: %s\n\nExplore the workspace for context, then produce your findings.", diff, focus)},
 		},
