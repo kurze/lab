@@ -54,6 +54,21 @@ jobs:
       - run: go test ./...
       - run: go vet ./...
 
+  gitlab-reviewer:
+    name: gitlab-reviewer
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: gitlab-reviewer
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache-dependency-path: gitlab-reviewer/go.sum
+      - run: go build ./...
+      - run: go vet ./...
+
   rfc863:
     name: rfc863
     runs-on: ubuntu-latest
