@@ -33,7 +33,6 @@ func runGrill(ctx context.Context, llm *LLMClient, model ModelDef, root, artifac
 	var contextPulled []string
 	var lastToolSig string
 	stuckCount := 0
-	totalTokens := 0
 
 	for iter := 1; iter <= maxIter; iter++ {
 		iterCtx, iterCancel := context.WithTimeout(ctx, perIterTimeout)
@@ -60,7 +59,6 @@ func runGrill(ctx context.Context, llm *LLMClient, model ModelDef, root, artifac
 			return nil, fmt.Errorf("iteration %d: empty response from LLM", iter)
 		}
 
-		totalTokens += resp.Usage.TotalTokens
 		msg := resp.Choices[0].Message
 		tracer.Log(TraceEntry{Iteration: iter, Role: "assistant", Content: msg.Content, ToolCalls: msg.ToolCalls})
 
@@ -81,8 +79,8 @@ func runGrill(ctx context.Context, llm *LLMClient, model ModelDef, root, artifac
 			return collectGrillPartial(model.ID, contextPulled, iter, true), nil
 		}
 
-		if totalTokens > model.TokenCeiling {
-			tracer.Log(TraceEntry{Iteration: iter, Role: "system", Content: fmt.Sprintf("token ceiling reached: %d", totalTokens)})
+		if resp.Usage.TotalTokens > model.TokenCeiling {
+			tracer.Log(TraceEntry{Iteration: iter, Role: "system", Content: fmt.Sprintf("token ceiling reached: %d", resp.Usage.TotalTokens)})
 			return collectGrillPartial(model.ID, contextPulled, iter, true), nil
 		}
 
@@ -131,7 +129,7 @@ Rules:
 }
 
 func parseGrillResponse(ctx context.Context, llm *LLMClient, model ModelDef, messages []chatMessage, msg chatMessage, tracer *Tracer, contextPulled []string, iter int) (*GrillResult, error) {
-	content := msg.Content
+	content := extractJSON(msg.Content)
 
 	var raw struct {
 		Questions []GrillQuestion `json:"questions"`

@@ -4,9 +4,26 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 )
+
+var codeBlockRe = regexp.MustCompile("(?s)```(?:json)?\\s*\n?(.*?)\\s*```")
+
+func extractJSON(s string) string {
+	s = strings.TrimSpace(s)
+	if strings.HasPrefix(s, "{") {
+		return s
+	}
+	if m := codeBlockRe.FindStringSubmatch(s); len(m) > 1 {
+		return strings.TrimSpace(m[1])
+	}
+	if start := strings.Index(s, "{"); start >= 0 {
+		return s[start:]
+	}
+	return s
+}
 
 const (
 	defaultMaxIter = 12
@@ -42,7 +59,6 @@ func runAgent(ctx context.Context, llm *LLMClient, model ModelDef, root, artifac
 	var contextPulled []string
 	var lastToolSig string
 	stuckCount := 0
-	totalTokens := 0
 
 	for iter := 1; iter <= maxIter; iter++ {
 		iterCtx, iterCancel := context.WithTimeout(ctx, perIterTimeout)
@@ -69,7 +85,6 @@ func runAgent(ctx context.Context, llm *LLMClient, model ModelDef, root, artifac
 			return nil, fmt.Errorf("iteration %d: empty response from LLM", iter)
 		}
 
-		totalTokens += resp.Usage.TotalTokens
 		msg := resp.Choices[0].Message
 		tracer.Log(TraceEntry{Iteration: iter, Role: "assistant", Content: msg.Content, ToolCalls: msg.ToolCalls})
 
@@ -90,8 +105,8 @@ func runAgent(ctx context.Context, llm *LLMClient, model ModelDef, root, artifac
 			return collectPartial(model.ID, contextPulled, iter, true), nil
 		}
 
-		if totalTokens > model.TokenCeiling {
-			tracer.Log(TraceEntry{Iteration: iter, Role: "system", Content: fmt.Sprintf("token ceiling reached: %d", totalTokens)})
+		if resp.Usage.TotalTokens > model.TokenCeiling {
+			tracer.Log(TraceEntry{Iteration: iter, Role: "system", Content: fmt.Sprintf("token ceiling reached: %d", resp.Usage.TotalTokens)})
 			return collectPartial(model.ID, contextPulled, iter, true), nil
 		}
 
@@ -177,7 +192,7 @@ func toolCallSignature(calls []llmTool) string {
 }
 
 func parseFinalResponse(ctx context.Context, llm *LLMClient, model ModelDef, messages []chatMessage, msg chatMessage, tracer *Tracer, contextPulled []string, iter int) (*ReviewResult, error) {
-	content := msg.Content
+	content := extractJSON(msg.Content)
 
 	var raw struct {
 		Findings      []Finding `json:"findings"`
