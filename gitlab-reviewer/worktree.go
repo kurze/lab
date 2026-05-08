@@ -11,7 +11,6 @@ import (
 )
 
 func cleanupStaleWorktree(ctx context.Context, absRepo, branchName string) {
-	// Find and remove any existing worktree for this branch
 	listCmd := exec.CommandContext(ctx, "git", "worktree", "list", "--porcelain")
 	listCmd.Dir = absRepo
 	out, err := listCmd.Output()
@@ -39,17 +38,26 @@ func cleanupStaleWorktree(ctx context.Context, absRepo, branchName string) {
 	delCmd.Run()
 }
 
-func CreateWorktree(ctx context.Context, repoPath string, mrIID int64) (dir string, cleanup func(), err error) {
+func fetchRef(forgeName string, id int64, branchName string) string {
+	switch forgeName {
+	case "github":
+		return fmt.Sprintf("+refs/pull/%d/head:refs/heads/%s", id, branchName)
+	default:
+		return fmt.Sprintf("+refs/merge-requests/%d/head:refs/heads/%s", id, branchName)
+	}
+}
+
+func CreateWorktree(ctx context.Context, repoPath string, id int64, forgeName string) (dir string, cleanup func(), err error) {
 	absRepo, err := filepath.Abs(repoPath)
 	if err != nil {
 		return "", nil, fmt.Errorf("resolve repo path: %w", err)
 	}
 
-	branchName := fmt.Sprintf("mr-%d", mrIID)
+	branchName := fmt.Sprintf("review-%d", id)
 
 	cleanupStaleWorktree(ctx, absRepo, branchName)
 
-	ref := fmt.Sprintf("+refs/merge-requests/%d/head:refs/heads/%s", mrIID, branchName)
+	ref := fetchRef(forgeName, id, branchName)
 
 	fetchCmd := exec.CommandContext(ctx, "git", "fetch", "origin", ref)
 	fetchCmd.Dir = absRepo
@@ -57,7 +65,7 @@ func CreateWorktree(ctx context.Context, repoPath string, mrIID int64) (dir stri
 		return "", nil, fmt.Errorf("git fetch: %w\n%s", err, out)
 	}
 
-	dir, err = os.MkdirTemp("", fmt.Sprintf("gitlab-reviewer-%d-", mrIID))
+	dir, err = os.MkdirTemp("", fmt.Sprintf("review-%d-", id))
 	if err != nil {
 		return "", nil, fmt.Errorf("create temp dir: %w", err)
 	}

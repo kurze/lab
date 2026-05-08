@@ -4,6 +4,7 @@ go 1.26.3
 
 require (
 	github.com/BurntSushi/toml v1.6.0
+	github.com/google/go-github/v72 v72.0.0
 	github.com/kurze/lab/agentcore v0.0.0
 	gitlab.com/gitlab-org/api/client-go v1.46.0
 	golang.org/x/text v0.32.0

@@ -18,7 +18,8 @@ type LLMConfig struct {
 }
 
 type Config struct {
-	GitLabURL     string    `toml:"gitlab_url"`
+	ForgeType     string    `toml:"forge"`
+	ForgeURL      string    `toml:"forge_url"`
 	Token         string    `toml:"token"`
 	Project       string    `toml:"project"`
 	ReviewLabel   string    `toml:"review_label"`
@@ -31,7 +32,6 @@ type Config struct {
 
 func loadConfig(path string) Config {
 	cfg := Config{
-		GitLabURL:   "https://gitlab.com",
 		ReviewLabel: "ai-reviewed",
 		RepoPath:    ".",
 		LLM: LLMConfig{
@@ -53,25 +53,25 @@ func loadConfig(path string) Config {
 		}
 	}
 
-	if v := os.Getenv("GITLAB_REVIEWER_URL"); v != "" {
-		cfg.GitLabURL = v
+	if v := os.Getenv("FORGE_URL"); v != "" {
+		cfg.ForgeURL = v
 	}
-	if v := os.Getenv("GITLAB_REVIEWER_TOKEN"); v != "" {
+	if v := os.Getenv("FORGE_TOKEN"); v != "" {
 		cfg.Token = v
 	}
-	if v := os.Getenv("GITLAB_REVIEWER_PROJECT"); v != "" {
+	if v := os.Getenv("FORGE_PROJECT"); v != "" {
 		cfg.Project = v
 	}
-	if v := os.Getenv("GITLAB_REVIEWER_COMMAND"); v != "" {
+	if v := os.Getenv("REVIEW_COMMAND"); v != "" {
 		cfg.ReviewCommand = v
 	}
-	if v := os.Getenv("GITLAB_REVIEWER_REPO_PATH"); v != "" {
+	if v := os.Getenv("REVIEW_REPO_PATH"); v != "" {
 		cfg.RepoPath = v
 	}
-	if v := os.Getenv("GITLAB_REVIEWER_LLM_URL"); v != "" {
+	if v := os.Getenv("REVIEW_LLM_URL"); v != "" {
 		cfg.LLM.URL = v
 	}
-	if v := os.Getenv("GITLAB_REVIEWER_LLM_MODEL"); v != "" {
+	if v := os.Getenv("REVIEW_LLM_MODEL"); v != "" {
 		cfg.LLM.Model = v
 	}
 
@@ -80,10 +80,10 @@ func loadConfig(path string) Config {
 
 func (c Config) Validate() error {
 	if c.Token == "" {
-		return fmt.Errorf("gitlab token required: set token in config or GITLAB_REVIEWER_TOKEN env var")
+		return fmt.Errorf("token required: set token in config or FORGE_TOKEN env var")
 	}
 	if c.Project == "" {
-		return fmt.Errorf("gitlab project required: set project in config or use --project flag")
+		return fmt.Errorf("project required: set project in config or use --project flag")
 	}
 	if c.ReviewCommand == "" && c.LLM.URL == "" {
 		return fmt.Errorf("review engine required: set review_command or [llm] url in config")

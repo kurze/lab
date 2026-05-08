@@ -12,8 +12,8 @@ import (
 )
 
 func main() {
-	project := flag.String("project", "", "GitLab project path (group/project)")
-	mrIID := flag.Int64("mr", 0, "review a single merge request by IID")
+	project := flag.String("project", "", "project path (owner/repo)")
+	mrIID := flag.Int64("mr", 0, "review a single merge/pull request by number")
 	post := flag.Bool("post", false, "post findings as comments and add label (default: dry-run)")
 	configPath := flag.String("config", "", "path to config file")
 	repoPath := flag.String("repo", "", "path to local repo clone")
@@ -42,10 +42,12 @@ func main() {
 }
 
 func run(ctx context.Context, cfg Config, singleMR int64) error {
-	gl, err := NewGitLabClient(cfg)
+	forge, err := NewForge(cfg)
 	if err != nil {
-		return fmt.Errorf("gitlab client: %w", err)
+		return fmt.Errorf("%s client: %w", forge.Name(), err)
 	}
+
+	log.Printf("using %s forge", forge.Name())
 
 	var reviewer Reviewer
 	if cfg.ReviewCommand != "" {
@@ -60,72 +62,72 @@ func run(ctx context.Context, cfg Config, singleMR int64) error {
 		}
 	}
 
-	var mrs []MergeRequest
+	var prs []PullRequest
 	if singleMR > 0 {
-		mr, err := gl.GetMR(ctx, singleMR)
+		pr, err := forge.Get(ctx, singleMR)
 		if err != nil {
-			return fmt.Errorf("get MR !%d: %w", singleMR, err)
+			return fmt.Errorf("get #%d: %w", singleMR, err)
 		}
-		mrs = []MergeRequest{mr}
+		prs = []PullRequest{pr}
 	} else {
-		mrs, err = gl.ListUnreviewedMRs(ctx, cfg.ReviewLabel)
+		prs, err = forge.ListUnreviewed(ctx, cfg.ReviewLabel)
 		if err != nil {
-			return fmt.Errorf("list MRs: %w", err)
+			return fmt.Errorf("list PRs: %w", err)
 		}
 	}
 
-	if len(mrs) == 0 {
-		log.Println("no unreviewed merge requests found")
+	if len(prs) == 0 {
+		log.Println("no unreviewed merge/pull requests found")
 		return nil
 	}
 
-	log.Printf("reviewing %d merge request(s)", len(mrs))
+	log.Printf("reviewing %d request(s)", len(prs))
 
-	for _, mr := range mrs {
+	for _, pr := range prs {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
 		}
 
-		log.Printf("reviewing MR !%d: %s", mr.IID, mr.Title)
+		log.Printf("reviewing #%d: %s", pr.ID, pr.Title)
 
-		diff, err := gl.GetMRDiff(ctx, mr.IID)
+		diff, err := forge.GetDiff(ctx, pr.ID)
 		if err != nil {
-			log.Printf("skip MR !%d: get diff: %v", mr.IID, err)
+			log.Printf("skip #%d: get diff: %v", pr.ID, err)
 			continue
 		}
 
-		worktreeDir, cleanup, err := CreateWorktree(ctx, cfg.RepoPath, mr.IID)
+		worktreeDir, cleanup, err := CreateWorktree(ctx, cfg.RepoPath, pr.ID, forge.Name())
 		if err != nil {
-			log.Printf("skip MR !%d: worktree: %v", mr.IID, err)
+			log.Printf("skip #%d: worktree: %v", pr.ID, err)
 			continue
 		}
 
 		result, err := reviewer.Review(ctx, worktreeDir, diff)
 		cleanup()
 		if err != nil {
-			log.Printf("skip MR !%d: review: %v", mr.IID, err)
+			log.Printf("skip #%d: review: %v", pr.ID, err)
 			continue
 		}
 
-		comment := FormatComment(result, mr.Title)
+		comment := FormatComment(result, pr.Title)
 
 		if cfg.DryRun {
-			fmt.Printf("--- MR !%d: %s ---\n%s\n\n", mr.IID, mr.Title, comment)
+			fmt.Printf("--- #%d: %s ---\n%s\n\n", pr.ID, pr.Title, comment)
 			continue
 		}
 
-		if err := gl.PostComment(ctx, mr.IID, comment); err != nil {
-			log.Printf("skip MR !%d: post comment: %v", mr.IID, err)
+		if err := forge.PostComment(ctx, pr.ID, comment); err != nil {
+			log.Printf("skip #%d: post comment: %v", pr.ID, err)
 			continue
 		}
 
-		if err := gl.AddLabel(ctx, mr.IID, cfg.ReviewLabel); err != nil {
-			log.Printf("warning: MR !%d: add label: %v", mr.IID, err)
+		if err := forge.AddLabel(ctx, pr.ID, cfg.ReviewLabel); err != nil {
+			log.Printf("warning: #%d: add label: %v", pr.ID, err)
 		}
 
-		log.Printf("reviewed MR !%d: %d finding(s)", mr.IID, len(result.Findings))
+		log.Printf("reviewed #%d: %d finding(s)", pr.ID, len(result.Findings))
 	}
 
 	return nil
