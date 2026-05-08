@@ -10,8 +10,8 @@ import (
 
 const (
 	defaultMaxIter = 12
-	perIterTimeout = 180 * time.Second
-	totalTimeout   = 5 * time.Minute
+	perIterTimeout = 5 * time.Minute
+	totalTimeout   = 20 * time.Minute
 	stuckThreshold = 3
 )
 
