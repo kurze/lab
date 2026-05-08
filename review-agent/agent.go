@@ -158,25 +158,35 @@ func dispatchTool(root string, tc llmTool, contextPulled *[]string) ToolResult {
 		return ToolResult{Content: fmt.Sprintf("invalid arguments: %s", err), IsError: true}
 	}
 
+	var result ToolResult
 	switch tc.Function.Name {
 	case "read_file":
 		path, _ := args["path"].(string)
 		start, _ := args["start"].(float64)
 		end, _ := args["end"].(float64)
-		*contextPulled = append(*contextPulled, path)
-		return execReadFile(root, path, int(start), int(end))
+		result = execReadFile(root, path, int(start), int(end))
+		if !result.IsError {
+			*contextPulled = append(*contextPulled, path)
+		}
+		return result
 
 	case "grep":
 		pattern, _ := args["pattern"].(string)
 		path, _ := args["path"].(string)
 		glob, _ := args["glob"].(string)
-		*contextPulled = append(*contextPulled, fmt.Sprintf("grep:%s in %s", pattern, path))
-		return execGrep(root, pattern, path, glob)
+		result = execGrep(root, pattern, path, glob)
+		if !result.IsError {
+			*contextPulled = append(*contextPulled, fmt.Sprintf("grep:%s in %s", pattern, path))
+		}
+		return result
 
 	case "list_dir":
 		path, _ := args["path"].(string)
-		*contextPulled = append(*contextPulled, fmt.Sprintf("ls:%s", path))
-		return execListDir(root, path)
+		result = execListDir(root, path)
+		if !result.IsError {
+			*contextPulled = append(*contextPulled, fmt.Sprintf("ls:%s", path))
+		}
+		return result
 
 	default:
 		return ToolResult{Content: fmt.Sprintf("unknown tool: %s", tc.Function.Name), IsError: true}

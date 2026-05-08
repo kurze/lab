@@ -55,6 +55,7 @@ func (t *Tracer) Log(entry TraceEntry) {
 	}
 	t.f.Write(data)
 	t.f.Write([]byte("\n"))
+	t.f.Sync()
 }
 
 func (t *Tracer) Close() {

@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 
@@ -42,7 +43,9 @@ func loadConfig() Config {
 
 	if home, err := os.UserHomeDir(); err == nil {
 		path := filepath.Join(home, ".config", "wlx-review-agent", "config.toml")
-		toml.DecodeFile(path, &cfg)
+		if _, err := toml.DecodeFile(path, &cfg); err != nil && !os.IsNotExist(err) {
+			log.Printf("warning: config %s: %v", path, err)
+		}
 	}
 
 	if v := os.Getenv("WLX_REVIEW_AGENT_LLM_URL"); v != "" {

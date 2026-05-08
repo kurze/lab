@@ -76,7 +76,10 @@ func execGrep(root, pattern, path, glob string) ToolResult {
 
 	err = filepath.Walk(safe, func(p string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() {
-			return err
+			return nil
+		}
+		if _, pathErr := safePath(root, p); pathErr != nil {
+			return nil
 		}
 		if glob != "" {
 			matched, _ := filepath.Match(glob, info.Name())
