@@ -49,7 +49,7 @@ func run(ctx context.Context, cfg Config, singleMR int64) error {
 
 	var reviewer Reviewer
 	if cfg.ReviewCommand != "" {
-		reviewer = &CommandReviewer{Command: cfg.ReviewCommand}
+		reviewer = &CommandReviewer{Command: cfg.ReviewCommand, Agent: cfg.ReviewAgent}
 	} else {
 		reviewer = &LLMReviewer{
 			LLM:          agentcore.NewLLMClient(cfg.LLM.URL),

@@ -8,9 +8,18 @@ import (
 	"golang.org/x/text/language"
 )
 
+func formatFooter(model string) string {
+	footer := "*Automated review by [gitlab-reviewer](https://github.com/kurze/lab/tree/main/gitlab-reviewer)"
+	if model != "" {
+		footer += fmt.Sprintf(" · agent: %s", model)
+	}
+	footer += "*"
+	return footer
+}
+
 func FormatComment(result *ReviewResult, mrTitle string) string {
 	if len(result.Findings) == 0 {
-		return "## AI Review\n\nNo findings for this merge request.\n\n---\n*Reviewed by gitlab-reviewer*"
+		return "## AI Review\n\nNo findings for this merge request.\n\n---\n" + formatFooter(result.Model)
 	}
 
 	groups := map[string][]Finding{}
@@ -42,6 +51,8 @@ func FormatComment(result *ReviewResult, mrTitle string) string {
 		}
 	}
 
-	b.WriteString("\n---\n*Reviewed by gitlab-reviewer*\n")
+	b.WriteString("\n---\n")
+	b.WriteString(formatFooter(result.Model))
+	b.WriteByte('\n')
 	return b.String()
 }

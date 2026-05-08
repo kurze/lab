@@ -23,6 +23,7 @@ type Config struct {
 	Project       string    `toml:"project"`
 	ReviewLabel   string    `toml:"review_label"`
 	ReviewCommand string    `toml:"review_command"`
+	ReviewAgent   string    `toml:"review_agent"`
 	RepoPath      string    `toml:"repo_path"`
 	LLM           LLMConfig `toml:"llm"`
 	DryRun        bool      `toml:"-"`

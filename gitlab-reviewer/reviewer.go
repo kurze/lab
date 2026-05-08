@@ -15,6 +15,7 @@ type Reviewer interface {
 
 type CommandReviewer struct {
 	Command string
+	Agent   string
 }
 
 func (r *CommandReviewer) Review(ctx context.Context, workDir string, diff string) (*ReviewResult, error) {
@@ -35,5 +36,6 @@ func (r *CommandReviewer) Review(ctx context.Context, workDir string, diff strin
 		return nil, fmt.Errorf("parse review output: %w\nraw output: %s", err, stdout.String())
 	}
 
+	result.Model = r.Agent
 	return &result, nil
 }

@@ -10,4 +10,5 @@ type Finding struct {
 
 type ReviewResult struct {
 	Findings []Finding `json:"findings"`
+	Model    string    `json:"-"`
 }

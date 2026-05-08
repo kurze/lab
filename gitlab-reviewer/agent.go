@@ -49,10 +49,15 @@ func (r *LLMReviewer) Review(ctx context.Context, workDir string, diff string) (
 	defer lr.Tracer.Close()
 
 	if lr.Truncated {
-		return &ReviewResult{Findings: []Finding{}}, nil
+		return &ReviewResult{Findings: []Finding{}, Model: r.Model}, nil
 	}
 
-	return parseLLMOutput(lr)
+	result, err := parseLLMOutput(lr)
+	if err != nil {
+		return nil, err
+	}
+	result.Model = r.Model
+	return result, nil
 }
 
 func buildMRReviewPrompt(root string) string {
