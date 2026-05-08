@@ -23,6 +23,7 @@ func runDiffReview(ctx context.Context, llm *LLMClient, model ModelDef, root, di
 		Root:        root,
 		Temperature: 0.3,
 		MaxIter:     maxIter,
+		MaxTokens:   3000,
 		TracerTag:   "diff-" + sanitizeTracerTag(diffRef),
 		Messages: []chatMessage{
 			{Role: "system", Content: systemPrompt},
@@ -68,7 +69,8 @@ Rules:
 - Be descriptive, never prescriptive. Say what you found, not what to do about it.
 - Every finding needs concrete evidence from the diff or codebase.
 - Pay attention to: missing error handling in new code, broken invariants, inconsistencies with existing patterns, untested edge cases, security implications.
-- When you are done exploring, stop calling tools and output your JSON.`, diffRef, focus, root)
+- Be concise. Short descriptions, minimal evidence quotes. No preamble or explanation outside the JSON.
+- When you are done exploring, stop calling tools and output ONLY your JSON.`, diffRef, focus, root)
 }
 
 func gitDiff(root, ref string) (string, error) {

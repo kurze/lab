@@ -14,6 +14,7 @@ type LoopConfig struct {
 	Messages    []chatMessage
 	Temperature float64
 	MaxIter     int
+	MaxTokens   int
 	TracerTag   string
 }
 
@@ -69,6 +70,7 @@ func runLoop(ctx context.Context, llm *LLMClient, cfg LoopConfig) (lr *LoopResul
 			Messages:    messages,
 			Tools:       agentTools,
 			Temperature: cfg.Temperature,
+			MaxTokens:   cfg.MaxTokens,
 		}
 
 		resp, err := llm.Chat(iterCtx, req)

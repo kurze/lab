@@ -107,6 +107,37 @@ func main() {
 
 	s.AddTool(diffTool, handleDiffReviewMCP(cfg, llm))
 
+	compareTool := mcp.NewTool("compare_artifacts",
+		mcp.WithDescription("Compare two versions of a document (spec, ADR, design doc) using a local LLM. Produces structured findings about what changed and what the changes mean: added/removed/weakened assumptions, contradictions, new risks."),
+		mcp.WithReadOnlyHintAnnotation(true),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithOpenWorldHintAnnotation(false),
+		mcp.WithString("old_path",
+			mcp.Description("Path to the old version of the artifact"),
+			mcp.Required(),
+		),
+		mcp.WithString("new_path",
+			mcp.Description("Path to the new version of the artifact"),
+			mcp.Required(),
+		),
+		mcp.WithString("focus",
+			mcp.Description("Focus area (e.g. 'security assumptions', 'API contract changes', 'deployment requirements')"),
+			mcp.Required(),
+		),
+		mcp.WithString("workspace_root",
+			mcp.Description("Root directory for workspace exploration. Defaults to the new artifact's parent directory."),
+		),
+		mcp.WithString("model",
+			mcp.Description(fmt.Sprintf("Model to use. Available: %s. Default: %s.", strings.Join(modelNames, ", "), cfg.DefaultModel)),
+		),
+		mcp.WithNumber("max_iterations",
+			mcp.Description("Maximum agent iterations. Default 12."),
+		),
+	)
+
+	s.AddTool(compareTool, handleCompare(cfg, llm))
+
 	stdio := server.NewStdioServer(s)
 	if err := stdio.Listen(context.Background(), os.Stdin, os.Stdout); err != nil {
 		log.Fatal(err)
@@ -220,6 +251,78 @@ func handleGrill(cfg Config, llm *LLMClient) server.ToolHandlerFunc {
 		result, err := runGrill(ctx, llm, model, root, relArtifact, focus, maxIter)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("grill failed: %s", err)), nil
+		}
+
+		data, err := json.Marshal(result)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("marshal result: %s", err)), nil
+		}
+
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
+func handleCompare(cfg Config, llm *LLMClient) server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		args := req.GetArguments()
+
+		oldPath, ok := args["old_path"].(string)
+		if !ok || oldPath == "" {
+			return mcp.NewToolResultError("old_path is required"), nil
+		}
+
+		newPath, ok := args["new_path"].(string)
+		if !ok || newPath == "" {
+			return mcp.NewToolResultError("new_path is required"), nil
+		}
+
+		focus, ok := args["focus"].(string)
+		if !ok || focus == "" {
+			return mcp.NewToolResultError("focus is required"), nil
+		}
+
+		workspaceRoot, _ := args["workspace_root"].(string)
+		if workspaceRoot == "" {
+			workspaceRoot = filepath.Dir(newPath)
+		}
+
+		modelName, _ := args["model"].(string)
+		model, err := cfg.ResolveModel(modelName)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		maxIter := defaultMaxIter
+		if v, ok := args["max_iterations"].(float64); ok && v > 0 {
+			maxIter = int(v)
+		}
+
+		root, err := canonicalRoot(workspaceRoot)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("invalid workspace root: %s", err)), nil
+		}
+
+		absOld, err := filepath.Abs(oldPath)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("invalid old path: %s", err)), nil
+		}
+		relOld, err := filepath.Rel(root, absOld)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("old artifact not under workspace root: %s", err)), nil
+		}
+
+		absNew, err := filepath.Abs(newPath)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("invalid new path: %s", err)), nil
+		}
+		relNew, err := filepath.Rel(root, absNew)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("new artifact not under workspace root: %s", err)), nil
+		}
+
+		result, err := runCompare(ctx, llm, model, root, relOld, relNew, focus, maxIter)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("compare failed: %s", err)), nil
 		}
 
 		data, err := json.Marshal(result)

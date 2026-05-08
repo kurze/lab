@@ -40,6 +40,7 @@ func runAgent(ctx context.Context, llm *LLMClient, model ModelDef, root, artifac
 		Root:        root,
 		Temperature: 0.3,
 		MaxIter:     maxIter,
+		MaxTokens:   3000,
 		TracerTag:   artifactPath,
 		Messages: []chatMessage{
 			{Role: "system", Content: systemPrompt},
@@ -82,7 +83,8 @@ Your final output MUST be a JSON object with exactly these fields:
 Rules:
 - Be descriptive, never prescriptive. Say what you found, not what to do about it.
 - Every finding needs concrete evidence from the artifact or codebase.
-- When you are done exploring, stop calling tools and output your JSON.`, artifactPath, focus, root)
+- Be concise. Short descriptions, minimal evidence quotes. No preamble or explanation outside the JSON.
+- When you are done exploring, stop calling tools and output ONLY your JSON.`, artifactPath, focus, root)
 }
 
 func parseReviewOutput(ctx context.Context, llm *LLMClient, model ModelDef, lr *LoopResult) (*ReviewResult, error) {

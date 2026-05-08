@@ -48,6 +48,7 @@ type chatRequest struct {
 	Tools          []any          `json:"tools,omitempty"`
 	ResponseFormat map[string]any `json:"response_format,omitempty"`
 	Temperature    float64        `json:"temperature"`
+	MaxTokens      int            `json:"max_tokens,omitempty"`
 }
 
 type chatResponse struct {

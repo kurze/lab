@@ -14,6 +14,7 @@ func runGrill(ctx context.Context, llm *LLMClient, model ModelDef, root, artifac
 		Root:        root,
 		Temperature: 0.5,
 		MaxIter:     maxIter,
+		MaxTokens:   3000,
 		TracerTag:   "grill-" + artifactPath,
 		Messages: []chatMessage{
 			{Role: "system", Content: systemPrompt},
@@ -58,7 +59,9 @@ Rules:
 - Prioritize questions that expose hidden assumptions or things that could go wrong.
 - Ask "what happens when..." and "how do you know that..." questions.
 - Do not ask obvious or generic questions. Every question should make the author think.
-- Aim for 5-15 questions, ranked by importance.`, artifactPath, focus, root)
+- Be concise. One-sentence questions, brief "why" explanations. No preamble outside the JSON.
+- Aim for 5-15 questions, ranked by importance.
+- When ready, output ONLY your JSON. No other text.`, artifactPath, focus, root)
 }
 
 func parseGrillOutput(ctx context.Context, llm *LLMClient, model ModelDef, lr *LoopResult) (*GrillResult, error) {
