@@ -61,6 +61,7 @@ func runLoop(ctx context.Context, llm *LLMClient, cfg LoopConfig) (lr *LoopResul
 	var lastToolSig string
 	stuckCount := 0
 	lastTokens := 0
+	nudged := false
 
 	for iter := 1; iter <= maxIter; iter++ {
 		iterCtx, iterCancel := context.WithTimeout(ctx, perIterTimeout)
@@ -74,6 +75,11 @@ func runLoop(ctx context.Context, llm *LLMClient, cfg LoopConfig) (lr *LoopResul
 		}
 
 		resp, err := llm.Chat(iterCtx, req)
+		if err != nil && ctx.Err() == nil {
+			tracer.Log(TraceEntry{Iteration: iter, Role: "error", Content: fmt.Sprintf("retrying: %s", err)})
+			time.Sleep(2 * time.Second)
+			resp, err = llm.Chat(iterCtx, req)
+		}
 		iterCancel()
 
 		if err != nil {
@@ -94,7 +100,8 @@ func runLoop(ctx context.Context, llm *LLMClient, cfg LoopConfig) (lr *LoopResul
 		tracer.Log(TraceEntry{Iteration: iter, Role: "assistant", Content: msg.Content, ToolCalls: msg.ToolCalls})
 
 		if len(msg.ToolCalls) == 0 || resp.Choices[0].FinishReason == "stop" {
-			if strings.TrimSpace(msg.Content) == "" && iter < maxIter {
+			if strings.TrimSpace(msg.Content) == "" && iter < maxIter && !nudged {
+				nudged = true
 				tracer.Log(TraceEntry{Iteration: iter, Role: "system", Content: "empty final response, nudging model"})
 				messages = append(messages, chatMessage{Role: "assistant", Content: msg.Content})
 				messages = append(messages, chatMessage{Role: "user", Content: "You stopped without producing output. Please produce your final JSON now."})

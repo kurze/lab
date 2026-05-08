@@ -146,6 +146,9 @@ func dispatchTool(root string, tc llmTool, contextPulled *[]string) ToolResult {
 	switch tc.Function.Name {
 	case "read_file":
 		path, _ := args["path"].(string)
+		if path == "" {
+			return ToolResult{Content: "missing required argument: path", IsError: true}
+		}
 		start, _ := args["start"].(float64)
 		end, _ := args["end"].(float64)
 		result = execReadFile(root, path, int(start), int(end))
@@ -156,7 +159,13 @@ func dispatchTool(root string, tc llmTool, contextPulled *[]string) ToolResult {
 
 	case "grep":
 		pattern, _ := args["pattern"].(string)
+		if pattern == "" {
+			return ToolResult{Content: "missing required argument: pattern", IsError: true}
+		}
 		path, _ := args["path"].(string)
+		if path == "" {
+			path = "."
+		}
 		glob, _ := args["glob"].(string)
 		result = execGrep(root, pattern, path, glob)
 		if !result.IsError {
@@ -166,6 +175,9 @@ func dispatchTool(root string, tc llmTool, contextPulled *[]string) ToolResult {
 
 	case "list_dir":
 		path, _ := args["path"].(string)
+		if path == "" {
+			path = "."
+		}
 		result = execListDir(root, path)
 		if !result.IsError {
 			*contextPulled = append(*contextPulled, fmt.Sprintf("ls:%s", path))
