@@ -10,16 +10,15 @@ import (
 type PullRequest struct {
 	ID     int64
 	Title  string
-	Labels []string
+	Author string
 }
 
 type Forge interface {
 	Name() string
-	ListUnreviewed(ctx context.Context, reviewLabel string) ([]PullRequest, error)
+	ListAll(ctx context.Context) ([]PullRequest, error)
 	Get(ctx context.Context, id int64) (PullRequest, error)
 	GetDiff(ctx context.Context, id int64) (string, error)
 	PostComment(ctx context.Context, id int64, body string) error
-	AddLabel(ctx context.Context, id int64, label string) error
 }
 
 func DetectForge(repoPath string) string {

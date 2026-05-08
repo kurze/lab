@@ -22,7 +22,6 @@ type Config struct {
 	ForgeURL      string    `toml:"forge_url"`
 	Token         string    `toml:"token"`
 	Project       string    `toml:"project"`
-	ReviewLabel   string    `toml:"review_label"`
 	ReviewCommand string    `toml:"review_command"`
 	ReviewAgent   string    `toml:"review_agent"`
 	RepoPath      string    `toml:"repo_path"`
@@ -32,8 +31,7 @@ type Config struct {
 
 func loadConfig(path string) Config {
 	cfg := Config{
-		ReviewLabel: "ai-reviewed",
-		RepoPath:    ".",
+		RepoPath: ".",
 		LLM: LLMConfig{
 			ContextSize:  200_000,
 			TokenCeiling: 150_000,

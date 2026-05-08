@@ -8,15 +8,17 @@ import (
 	"os"
 	"os/signal"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/kurze/lab/agentcore"
 )
 
 func main() {
 	project := flag.String("project", "", "project path (owner/repo)")
 	mrIID := flag.Int64("mr", 0, "review a single merge/pull request by number")
-	post := flag.Bool("post", false, "post findings as comments and add label (default: dry-run)")
+	post := flag.Bool("post", false, "post findings as comments (default: dry-run)")
 	configPath := flag.String("config", "", "path to config file")
 	repoPath := flag.String("repo", "", "path to local repo clone")
+	batch := flag.Bool("batch", false, "batch mode: review all unreviewed MRs without TUI")
 	flag.Parse()
 
 	cfg := loadConfig(*configPath)
@@ -33,34 +35,53 @@ func main() {
 		os.Exit(1)
 	}
 
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer cancel()
+	state, err := LoadState("")
+	if err != nil {
+		log.Fatalf("state: %v", err)
+	}
 
-	if err := run(ctx, cfg, *mrIID); err != nil {
-		log.Fatalf("error: %v", err)
+	if *mrIID > 0 || *batch {
+		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+		defer cancel()
+		if err := run(ctx, cfg, state, *mrIID); err != nil {
+			log.Fatalf("error: %v", err)
+		}
+		return
+	}
+
+	forge, err := NewForge(cfg)
+	if err != nil {
+		log.Fatalf("forge: %v", err)
+	}
+
+	m := newModel(forge, newReviewer(cfg), cfg, state)
+	p := tea.NewProgram(m, tea.WithAltScreen())
+	if _, err := p.Run(); err != nil {
+		log.Fatalf("tui: %v", err)
 	}
 }
 
-func run(ctx context.Context, cfg Config, singleMR int64) error {
+func newReviewer(cfg Config) Reviewer {
+	if cfg.ReviewCommand != "" {
+		return &CommandReviewer{Command: cfg.ReviewCommand, Agent: cfg.ReviewAgent}
+	}
+	return &LLMReviewer{
+		LLM:          agentcore.NewLLMClient(cfg.LLM.URL),
+		Model:        cfg.LLM.Model,
+		ContextSize:  cfg.LLM.ContextSize,
+		TokenCeiling: cfg.LLM.TokenCeiling,
+		Temperature:  cfg.LLM.Temperature,
+	}
+}
+
+func run(ctx context.Context, cfg Config, state *State, singleMR int64) error {
 	forge, err := NewForge(cfg)
 	if err != nil {
 		return fmt.Errorf("%s client: %w", forge.Name(), err)
 	}
 
 	log.Printf("using %s forge", forge.Name())
-
-	var reviewer Reviewer
-	if cfg.ReviewCommand != "" {
-		reviewer = &CommandReviewer{Command: cfg.ReviewCommand, Agent: cfg.ReviewAgent}
-	} else {
-		reviewer = &LLMReviewer{
-			LLM:          agentcore.NewLLMClient(cfg.LLM.URL),
-			Model:        cfg.LLM.Model,
-			ContextSize:  cfg.LLM.ContextSize,
-			TokenCeiling: cfg.LLM.TokenCeiling,
-			Temperature:  cfg.LLM.Temperature,
-		}
-	}
+	reviewer := newReviewer(cfg)
 
 	var prs []PullRequest
 	if singleMR > 0 {
@@ -70,9 +91,14 @@ func run(ctx context.Context, cfg Config, singleMR int64) error {
 		}
 		prs = []PullRequest{pr}
 	} else {
-		prs, err = forge.ListUnreviewed(ctx, cfg.ReviewLabel)
+		all, err := forge.ListAll(ctx)
 		if err != nil {
 			return fmt.Errorf("list PRs: %w", err)
+		}
+		for _, pr := range all {
+			if !state.IsReviewed(cfg.Project, pr.ID) {
+				prs = append(prs, pr)
+			}
 		}
 	}
 
@@ -115,16 +141,16 @@ func run(ctx context.Context, cfg Config, singleMR int64) error {
 
 		if cfg.DryRun {
 			fmt.Printf("--- #%d: %s ---\n%s\n\n", pr.ID, pr.Title, comment)
-			continue
+		} else {
+			if err := forge.PostComment(ctx, pr.ID, comment); err != nil {
+				log.Printf("skip #%d: post comment: %v", pr.ID, err)
+				continue
+			}
 		}
 
-		if err := forge.PostComment(ctx, pr.ID, comment); err != nil {
-			log.Printf("skip #%d: post comment: %v", pr.ID, err)
-			continue
-		}
-
-		if err := forge.AddLabel(ctx, pr.ID, cfg.ReviewLabel); err != nil {
-			log.Printf("warning: #%d: add label: %v", pr.ID, err)
+		state.MarkReviewed(cfg.Project, pr.ID)
+		if err := state.Save(); err != nil {
+			log.Printf("warning: save state: %v", err)
 		}
 
 		log.Printf("reviewed #%d: %d finding(s)", pr.ID, len(result.Findings))

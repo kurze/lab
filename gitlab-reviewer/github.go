@@ -36,7 +36,7 @@ func NewGitHubClient(cfg Config) (*GitHubClient, error) {
 
 func (g *GitHubClient) Name() string { return "github" }
 
-func (g *GitHubClient) ListUnreviewed(ctx context.Context, reviewLabel string) ([]PullRequest, error) {
+func (g *GitHubClient) ListAll(ctx context.Context) ([]PullRequest, error) {
 	prs, _, err := g.client.PullRequests.List(ctx, g.owner, g.repo, &github.PullRequestListOptions{
 		State:       "open",
 		ListOptions: github.ListOptions{PerPage: 100},
@@ -47,13 +47,10 @@ func (g *GitHubClient) ListUnreviewed(ctx context.Context, reviewLabel string) (
 
 	var result []PullRequest
 	for _, pr := range prs {
-		if hasGitHubLabel(pr.Labels, reviewLabel) {
-			continue
-		}
 		result = append(result, PullRequest{
 			ID:     int64(pr.GetNumber()),
 			Title:  pr.GetTitle(),
-			Labels: gitHubLabelNames(pr.Labels),
+			Author: pr.GetUser().GetLogin(),
 		})
 	}
 	return result, nil
@@ -67,7 +64,7 @@ func (g *GitHubClient) Get(ctx context.Context, id int64) (PullRequest, error) {
 	return PullRequest{
 		ID:     int64(pr.GetNumber()),
 		Title:  pr.GetTitle(),
-		Labels: gitHubLabelNames(pr.Labels),
+		Author: pr.GetUser().GetLogin(),
 	}, nil
 }
 
@@ -86,32 +83,10 @@ func (g *GitHubClient) PostComment(ctx context.Context, id int64, body string) e
 	return err
 }
 
-func (g *GitHubClient) AddLabel(ctx context.Context, id int64, label string) error {
-	_, _, err := g.client.Issues.AddLabelsToIssue(ctx, g.owner, g.repo, int(id), []string{label})
-	return err
-}
-
 func splitOwnerRepo(project string) (string, string, error) {
 	parts := strings.SplitN(project, "/", 2)
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
 		return "", "", fmt.Errorf("project must be owner/repo, got: %q", project)
 	}
 	return parts[0], parts[1], nil
-}
-
-func hasGitHubLabel(labels []*github.Label, target string) bool {
-	for _, l := range labels {
-		if l.GetName() == target {
-			return true
-		}
-	}
-	return false
-}
-
-func gitHubLabelNames(labels []*github.Label) []string {
-	names := make([]string, len(labels))
-	for i, l := range labels {
-		names[i] = l.GetName()
-	}
-	return names
 }

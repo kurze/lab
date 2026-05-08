@@ -27,13 +27,11 @@ func NewGitLabClient(cfg Config) (*GitLabClient, error) {
 
 func (g *GitLabClient) Name() string { return "gitlab" }
 
-func (g *GitLabClient) ListUnreviewed(_ context.Context, reviewLabel string) ([]PullRequest, error) {
+func (g *GitLabClient) ListAll(_ context.Context) ([]PullRequest, error) {
 	state := "opened"
 	opts := &gitlab.ListProjectMergeRequestsOptions{
-		State: &state,
-		ListOptions: gitlab.ListOptions{
-			PerPage: 100,
-		},
+		State:       &state,
+		ListOptions: gitlab.ListOptions{PerPage: 100},
 	}
 
 	mrs, _, err := g.client.MergeRequests.ListProjectMergeRequests(g.project, opts)
@@ -43,13 +41,14 @@ func (g *GitLabClient) ListUnreviewed(_ context.Context, reviewLabel string) ([]
 
 	var result []PullRequest
 	for _, mr := range mrs {
-		if hasLabel(mr.Labels, reviewLabel) {
-			continue
+		author := ""
+		if mr.Author != nil {
+			author = mr.Author.Username
 		}
 		result = append(result, PullRequest{
 			ID:     mr.IID,
 			Title:  mr.Title,
-			Labels: []string(mr.Labels),
+			Author: author,
 		})
 	}
 	return result, nil
@@ -60,10 +59,14 @@ func (g *GitLabClient) Get(_ context.Context, id int64) (PullRequest, error) {
 	if err != nil {
 		return PullRequest{}, err
 	}
+	author := ""
+	if mr.Author != nil {
+		author = mr.Author.Username
+	}
 	return PullRequest{
 		ID:     mr.IID,
 		Title:  mr.Title,
-		Labels: []string(mr.Labels),
+		Author: author,
 	}, nil
 }
 
@@ -92,27 +95,4 @@ func (g *GitLabClient) PostComment(_ context.Context, id int64, body string) err
 		Body: &body,
 	})
 	return err
-}
-
-func (g *GitLabClient) AddLabel(_ context.Context, id int64, label string) error {
-	mr, _, err := g.client.MergeRequests.GetMergeRequest(g.project, id, nil)
-	if err != nil {
-		return err
-	}
-
-	labels := append(mr.Labels, label)
-	labelOpts := gitlab.LabelOptions(labels)
-	_, _, err = g.client.MergeRequests.UpdateMergeRequest(g.project, id, &gitlab.UpdateMergeRequestOptions{
-		Labels: &labelOpts,
-	})
-	return err
-}
-
-func hasLabel(labels gitlab.Labels, target string) bool {
-	for _, l := range labels {
-		if l == target {
-			return true
-		}
-	}
-	return false
 }
