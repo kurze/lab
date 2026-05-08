@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 )
@@ -194,10 +195,11 @@ func dispatchTool(root string, tc llmTool, contextPulled *[]string) ToolResult {
 }
 
 func toolCallSignature(calls []llmTool) string {
-	var parts []string
-	for _, c := range calls {
-		parts = append(parts, c.Function.Name+":"+c.Function.Arguments)
+	parts := make([]string, len(calls))
+	for i, c := range calls {
+		parts[i] = c.Function.Name + ":" + c.Function.Arguments
 	}
+	sort.Strings(parts)
 	return strings.Join(parts, "|")
 }
 
