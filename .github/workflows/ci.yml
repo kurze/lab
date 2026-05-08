@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  fast-chat-go:
+    name: fast-chat (Go)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: fast-chat/go
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - run: go build ./...
+      - run: go test ./...
+      - run: go vet ./...
+
+  fast-chat-rust:
+    name: fast-chat (Rust)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: fast-chat/rust
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fast-chat/rust
+      - run: cargo build
+      - run: cargo clippy -- -D warnings
+
+  review-agent:
+    name: review-agent
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: review-agent
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - run: go build ./...
+      - run: go test ./...
+      - run: go vet ./...
+
+  rfc863:
+    name: rfc863
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: rfc863
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rfc863
+      - run: cargo build
+      - run: cargo clippy -- -D warnings
