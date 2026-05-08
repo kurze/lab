@@ -53,9 +53,9 @@ func (t *Tracer) Log(entry TraceEntry) {
 	if err != nil {
 		return
 	}
-	t.f.Write(data)
-	t.f.Write([]byte("\n"))
-	t.f.Sync()
+	_, _ = t.f.Write(data)
+	_, _ = t.f.Write([]byte("\n"))
+	_ = t.f.Sync()
 }
 
 func (t *Tracer) Close() {

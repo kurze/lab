@@ -28,11 +28,15 @@ func setupGitRepo(t *testing.T) string {
 	}
 
 	run("init")
-	os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644)
+	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	run("add", ".")
 	run("commit", "-m", "initial")
 
-	os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\n\nimport \"fmt\"\n\nfunc main() {\n\tfmt.Println(\"hello\")\n}\n"), 0o644)
+	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\n\nimport \"fmt\"\n\nfunc main() {\n\tfmt.Println(\"hello\")\n}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	return root
 }
@@ -70,7 +74,9 @@ func TestGitDiffEmpty(t *testing.T) {
 	}
 
 	run("init")
-	os.WriteFile(filepath.Join(root, "f.txt"), []byte("hello"), 0o644)
+	if err := os.WriteFile(filepath.Join(root, "f.txt"), []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	run("add", ".")
 	run("commit", "-m", "init")
 

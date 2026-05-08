@@ -8,8 +8,12 @@ import (
 
 func TestSafePath(t *testing.T) {
 	root := t.TempDir()
-	os.MkdirAll(filepath.Join(root, "sub"), 0o755)
-	os.WriteFile(filepath.Join(root, "sub", "file.txt"), []byte("hello"), 0o644)
+	if err := os.MkdirAll(filepath.Join(root, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "sub", "file.txt"), []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	tests := []struct {
 		name    string
@@ -39,8 +43,12 @@ func TestSafePath(t *testing.T) {
 func TestSafePathSymlinkEscape(t *testing.T) {
 	root := t.TempDir()
 	outside := t.TempDir()
-	os.WriteFile(filepath.Join(outside, "secret.txt"), []byte("secret"), 0o644)
-	os.Symlink(outside, filepath.Join(root, "escape"))
+	if err := os.WriteFile(filepath.Join(outside, "secret.txt"), []byte("secret"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "escape")); err != nil {
+		t.Fatal(err)
+	}
 
 	_, err := safePath(root, "escape/secret.txt")
 	if err == nil {

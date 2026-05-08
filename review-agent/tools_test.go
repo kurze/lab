@@ -10,9 +10,15 @@ import (
 func setupWorkspace(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
-	os.MkdirAll(filepath.Join(root, "docs"), 0o755)
-	os.WriteFile(filepath.Join(root, "docs", "adr.md"), []byte("# ADR 001\nDecision: use Go\nReason: portability\n"), 0o644)
-	os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644)
+	if err := os.MkdirAll(filepath.Join(root, "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "docs", "adr.md"), []byte("# ADR 001\nDecision: use Go\nReason: portability\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	return root
 }
 
