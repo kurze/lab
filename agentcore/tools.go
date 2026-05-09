@@ -103,6 +103,53 @@ func StandardToolDefs() []any {
 				},
 			},
 		},
+		map[string]any{
+			"type": "function",
+			"function": map[string]any{
+				"name":        "git_diff",
+				"description": "Show diff between two git refs, or for a specific file. Useful to see what changed between commits or branches.",
+				"parameters": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"base": map[string]any{"type": "string", "description": "Base ref (commit, branch, tag). Default: HEAD~1"},
+						"head": map[string]any{"type": "string", "description": "Head ref to compare against. Default: HEAD"},
+						"path": map[string]any{"type": "string", "description": "Limit diff to a specific file path (optional)"},
+						"stat": map[string]any{"type": "boolean", "description": "If true, show only file names and stats, not full diff"},
+					},
+				},
+			},
+		},
+		map[string]any{
+			"type": "function",
+			"function": map[string]any{
+				"name":        "git_blame",
+				"description": "Show who last modified each line of a file and when. Useful to understand authorship and recency of code.",
+				"parameters": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"path":  map[string]any{"type": "string", "description": "File path relative to workspace root"},
+						"start": map[string]any{"type": "integer", "description": "Start line (optional, 1-indexed)"},
+						"end":   map[string]any{"type": "integer", "description": "End line (optional, inclusive)"},
+					},
+					"required": []string{"path"},
+				},
+			},
+		},
+		map[string]any{
+			"type": "function",
+			"function": map[string]any{
+				"name":        "git_show",
+				"description": "Show the contents of a specific git commit: message, author, date, and diff.",
+				"parameters": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"ref":  map[string]any{"type": "string", "description": "Commit ref (hash, branch, tag, HEAD~N)"},
+						"stat": map[string]any{"type": "boolean", "description": "If true, show only file stats, not full diff"},
+					},
+					"required": []string{"ref"},
+				},
+			},
+		},
 	}
 }
 
@@ -228,6 +275,42 @@ func StandardToolDispatch(root string, tc LLMTool, contextPulled *[]string, seen
 		result := ExecGitLog(root, int(count), ref)
 		if !result.IsError {
 			*contextPulled = append(*contextPulled, fmt.Sprintf("git_log:%s", ref))
+		}
+		return result.Truncated()
+
+	case "git_diff":
+		base, _ := args["base"].(string)
+		head, _ := args["head"].(string)
+		path, _ := args["path"].(string)
+		stat, _ := args["stat"].(bool)
+		result := ExecGitDiff(root, base, head, path, stat)
+		if !result.IsError {
+			*contextPulled = append(*contextPulled, fmt.Sprintf("git_diff:%s..%s", base, head))
+		}
+		return result.Truncated()
+
+	case "git_blame":
+		path, _ := args["path"].(string)
+		if path == "" {
+			return ToolResult{Content: "missing required argument: path", IsError: true}
+		}
+		start, _ := args["start"].(float64)
+		end, _ := args["end"].(float64)
+		result := ExecGitBlame(root, path, int(start), int(end))
+		if !result.IsError {
+			*contextPulled = append(*contextPulled, fmt.Sprintf("git_blame:%s", path))
+		}
+		return result.Truncated()
+
+	case "git_show":
+		ref, _ := args["ref"].(string)
+		if ref == "" {
+			return ToolResult{Content: "missing required argument: ref", IsError: true}
+		}
+		stat, _ := args["stat"].(bool)
+		result := ExecGitShow(root, ref, stat)
+		if !result.IsError {
+			*contextPulled = append(*contextPulled, fmt.Sprintf("git_show:%s", ref))
 		}
 		return result.Truncated()
 
@@ -455,6 +538,131 @@ func ExecGitLog(root string, count int, ref string) ToolResult {
 	}
 	if len(out) == 0 {
 		return ToolResult{Content: "no commits found"}
+	}
+	return ToolResult{Content: string(out)}
+}
+
+func ExecGitDiff(root, base, head, path string, stat bool) ToolResult {
+	if base == "" {
+		base = "HEAD~1"
+	}
+	if head == "" {
+		head = "HEAD"
+	}
+	args := []string{"diff", base, head}
+	if stat {
+		args = append(args, "--stat")
+	}
+	if path != "" {
+		args = append(args, "--", path)
+	}
+
+	cmd := exec.Command("git", args...)
+	cmd.Dir = root
+	out, err := cmd.Output()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return ToolResult{Content: fmt.Sprintf("git diff failed: %s", string(exitErr.Stderr)), IsError: true}
+		}
+		return ToolResult{Content: fmt.Sprintf("git diff failed: %s", err), IsError: true}
+	}
+	if len(out) == 0 {
+		return ToolResult{Content: "no differences found"}
+	}
+	return ToolResult{Content: string(out)}
+}
+
+func ExecGitBlame(root, path string, start, end int) ToolResult {
+	safe, err := SafePath(root, path)
+	if err != nil {
+		return ToolResult{Content: err.Error(), IsError: true}
+	}
+
+	rel, err := filepath.Rel(root, safe)
+	if err != nil {
+		return ToolResult{Content: err.Error(), IsError: true}
+	}
+
+	args := []string{"blame", "--porcelain"}
+	if start > 0 && end >= start {
+		args = append(args, fmt.Sprintf("-L%d,%d", start, end))
+	} else if start > 0 {
+		args = append(args, fmt.Sprintf("-L%d,+50", start))
+	}
+	args = append(args, rel)
+
+	cmd := exec.Command("git", args...)
+	cmd.Dir = root
+	out, err := cmd.Output()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return ToolResult{Content: fmt.Sprintf("git blame failed: %s", string(exitErr.Stderr)), IsError: true}
+		}
+		return ToolResult{Content: fmt.Sprintf("git blame failed: %s", err), IsError: true}
+	}
+	if len(out) == 0 {
+		return ToolResult{Content: "no blame output"}
+	}
+
+	return ToolResult{Content: summarizeBlame(string(out))}
+}
+
+func summarizeBlame(porcelain string) string {
+	type blameInfo struct {
+		author string
+		date   string
+		line   int
+		text   string
+	}
+
+	var entries []blameInfo
+	var current blameInfo
+	lineNum := 0
+
+	for _, raw := range strings.Split(porcelain, "\n") {
+		switch {
+		case strings.HasPrefix(raw, "author "):
+			current.author = strings.TrimPrefix(raw, "author ")
+		case strings.HasPrefix(raw, "author-time "):
+			ts := strings.TrimPrefix(raw, "author-time ")
+			if t, err := fmt.Sscanf(ts, "%d", new(int64)); err == nil && t > 0 {
+				var unix int64
+				fmt.Sscanf(ts, "%d", &unix)
+				current.date = fmt.Sprintf("%d", unix)
+			}
+		case strings.HasPrefix(raw, "\t"):
+			lineNum++
+			current.line = lineNum
+			current.text = strings.TrimPrefix(raw, "\t")
+			entries = append(entries, current)
+			current = blameInfo{}
+		}
+	}
+
+	var b strings.Builder
+	for _, e := range entries {
+		fmt.Fprintf(&b, "%4d │ %-20s │ %s\n", e.line, e.author, e.text)
+	}
+	return b.String()
+}
+
+func ExecGitShow(root, ref string, stat bool) ToolResult {
+	args := []string{"show", ref, "--no-decorate"}
+	if stat {
+		args = []string{"show", ref, "--no-decorate", "--stat"}
+	}
+
+	cmd := exec.Command("git", args...)
+	cmd.Dir = root
+	out, err := cmd.Output()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return ToolResult{Content: fmt.Sprintf("git show failed: %s", string(exitErr.Stderr)), IsError: true}
+		}
+		return ToolResult{Content: fmt.Sprintf("git show failed: %s", err), IsError: true}
+	}
+	if len(out) == 0 {
+		return ToolResult{Content: "no output"}
 	}
 	return ToolResult{Content: string(out)}
 }
