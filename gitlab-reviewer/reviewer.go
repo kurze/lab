@@ -11,6 +11,7 @@ import (
 
 type Reviewer interface {
 	Review(ctx context.Context, workDir string, diff string) (*ReviewResult, error)
+	ReviewFull(ctx context.Context, workDir string, diff string) (*ReviewResult, error)
 	ReviewWithContext(ctx context.Context, workDir string, diff string, priorContext string) (*ReviewResult, error)
 }
 
@@ -39,6 +40,10 @@ func (r *CommandReviewer) Review(ctx context.Context, workDir string, diff strin
 
 	result.Model = r.Agent
 	return &result, nil
+}
+
+func (r *CommandReviewer) ReviewFull(ctx context.Context, workDir string, diff string) (*ReviewResult, error) {
+	return r.Review(ctx, workDir, diff)
 }
 
 func (r *CommandReviewer) ReviewWithContext(ctx context.Context, workDir string, diff string, priorContext string) (*ReviewResult, error) {

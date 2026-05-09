@@ -433,7 +433,7 @@ func (m model) reviewOne(pr PullRequest, mode string) tea.Cmd {
 			if err != nil {
 				return reviewDoneMsg{id: pr.ID, err: fmt.Errorf("get diff: %w", err)}
 			}
-			result, err := m.reviewer.Review(ctx, worktreeDir, diff)
+			result, err := m.reviewer.ReviewFull(ctx, worktreeDir, diff)
 			return reviewDoneMsg{id: pr.ID, result: result, err: err}
 		}
 	}

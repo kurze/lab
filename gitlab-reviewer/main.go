@@ -181,7 +181,7 @@ func runBranch(ctx context.Context, cfg Config, branchName string) error {
 		if err != nil {
 			return fmt.Errorf("branch diff: %w", err)
 		}
-		result, err = reviewer.Review(ctx, cfg.RepoPath, diff)
+		result, err = reviewer.ReviewFull(ctx, cfg.RepoPath, diff)
 		if err != nil {
 			return fmt.Errorf("review: %w", err)
 		}
@@ -316,7 +316,7 @@ func run(ctx context.Context, cfg Config, state *State, singleMR int64) error {
 				log.Printf("skip #%d: get diff: %v", pr.ID, err)
 				continue
 			}
-			result, err = reviewer.Review(ctx, worktreeDir, diff)
+			result, err = reviewer.ReviewFull(ctx, worktreeDir, diff)
 			cleanup()
 			if err != nil {
 				log.Printf("skip #%d: review: %v", pr.ID, err)
