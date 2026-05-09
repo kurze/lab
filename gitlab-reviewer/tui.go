@@ -68,9 +68,10 @@ type model struct {
 	programRef  **tea.Program
 	quitting    bool
 	message     string
-	pickingMode bool
-	modeChoice  int
-	pickTarget  int
+	pickingMode  bool
+	modeChoice   int
+	pickTarget   int
+	detailScroll int
 }
 
 type reviewProgressMsg struct {
@@ -204,6 +205,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.postSelected()
 		case "P":
 			return m, m.postAll()
+		case "J":
+			m.detailScroll++
+		case "K":
+			if m.detailScroll > 0 {
+				m.detailScroll--
+			}
 		case "l":
 			m.message = "loading..."
 			return m, m.loadList()
@@ -273,6 +280,7 @@ func (m *model) moveCursor(delta int) {
 	}
 	m.cursor += delta
 	m.clampCursor()
+	m.detailScroll = 0
 }
 
 func (m *model) clampCursor() {
@@ -628,17 +636,17 @@ func (m model) View() string {
 		item := m.items[idx]
 		switch item.status {
 		case statusDone:
-			if item.result != nil && len(item.result.Findings) > 0 {
-				for _, f := range item.result.Findings {
-					if detailLines >= detailHeight-1 {
-						break
-					}
-					sev := renderSeverity(f.Severity)
-					loc := ""
-					if f.Location != "" {
-						loc = dimStyle.Render(" " + f.Location)
-					}
-					line := fmt.Sprintf("  %s %s%s — %s", sev, f.Category, loc, f.Description)
+			lines := m.buildDetailLines(item)
+			if len(lines) == 0 {
+				b.WriteString(dimStyle.Render("  no findings"))
+				b.WriteByte('\n')
+				detailLines++
+			} else {
+				if m.detailScroll >= len(lines) {
+					m.detailScroll = len(lines) - 1
+				}
+				for i := m.detailScroll; i < len(lines) && detailLines < detailHeight-1; i++ {
+					line := lines[i]
 					if len(line) > m.width {
 						line = line[:m.width]
 					}
@@ -646,33 +654,6 @@ func (m model) View() string {
 					b.WriteByte('\n')
 					detailLines++
 				}
-				if item.branchResult != nil && len(item.branchResult.Findings) > 0 && detailLines < detailHeight-1 {
-					sep := dimStyle.Render("  ── branch-level ──")
-					b.WriteString(sep)
-					b.WriteByte('\n')
-					detailLines++
-					for _, f := range item.branchResult.Findings {
-						if detailLines >= detailHeight-1 {
-							break
-						}
-						sev := renderSeverity(f.Severity)
-						loc := ""
-						if f.Location != "" {
-							loc = dimStyle.Render(" " + f.Location)
-						}
-						line := fmt.Sprintf("  %s %s%s — %s", sev, f.Category, loc, f.Description)
-						if len(line) > m.width {
-							line = line[:m.width]
-						}
-						b.WriteString(line)
-						b.WriteByte('\n')
-						detailLines++
-					}
-				}
-			} else {
-				b.WriteString(dimStyle.Render("  no findings"))
-				b.WriteByte('\n')
-				detailLines++
 			}
 		case statusReviewing:
 			if item.progress != "" {
@@ -713,7 +694,7 @@ func (m model) View() string {
 
 	// Action bar
 	actions := []string{
-		"j/k:navigate", "space:select", "a:select all",
+		"j/k:navigate", "J/K:scroll", "space:select", "a:select all",
 		"tab:filter", "r:review", "R:review all",
 		"p:post", "P:post all", "l:reload", "q:quit",
 	}
@@ -724,6 +705,52 @@ func (m model) View() string {
 	b.WriteString(actionBar.Render(bar))
 
 	return b.String()
+}
+
+func (m model) buildDetailLines(item prItem) []string {
+	var lines []string
+
+	if len(item.commitResults) > 0 {
+		for _, cr := range item.commitResults {
+			sha := cr.Commit.SHA
+			if len(sha) > 8 {
+				sha = sha[:8]
+			}
+			msg := cr.Commit.Message
+			if idx := strings.IndexByte(msg, '\n'); idx > 0 {
+				msg = msg[:idx]
+			}
+			header := dimStyle.Render(fmt.Sprintf("  ── %s %s ──", sha, msg))
+			lines = append(lines, header)
+			if cr.Result == nil || len(cr.Result.Findings) == 0 {
+				lines = append(lines, dimStyle.Render("    no findings"))
+				continue
+			}
+			for _, f := range cr.Result.Findings {
+				lines = append(lines, formatDetailFinding(f))
+			}
+		}
+		if item.branchResult != nil && len(item.branchResult.Findings) > 0 {
+			lines = append(lines, dimStyle.Render("  ── branch-level ──"))
+			for _, f := range item.branchResult.Findings {
+				lines = append(lines, formatDetailFinding(f))
+			}
+		}
+	} else if item.result != nil {
+		for _, f := range item.result.Findings {
+			lines = append(lines, formatDetailFinding(f))
+		}
+	}
+	return lines
+}
+
+func formatDetailFinding(f Finding) string {
+	sev := renderSeverity(f.Severity)
+	loc := ""
+	if f.Location != "" {
+		loc = dimStyle.Render(" " + f.Location)
+	}
+	return fmt.Sprintf("  %s %s%s — %s", sev, f.Category, loc, f.Description)
 }
 
 func relativeTime(t time.Time) string {
