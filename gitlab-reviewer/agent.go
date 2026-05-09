@@ -127,118 +127,60 @@ func (r *LLMReviewer) ReviewWithContext(ctx context.Context, workDir string, dif
 }
 
 func buildMRRepassPrompt(root string, priorContext string) string {
-	return fmt.Sprintf(`You are a code review agent performing a second-pass review of a merge request.
-A first pass already reviewed each commit individually and found these issues:
+	return fmt.Sprintf(`You are a code review agent. Second pass — DO NOT repeat prior findings. Be brief.
 
+Prior findings:
 <prior_findings>
 %s
 </prior_findings>
 
-DO NOT repeat any finding already covered above. Focus exclusively on:
-- Cross-commit interactions: does a change in one commit break an assumption made in another?
-- Architectural impact: does the overall change introduce structural problems not visible per-commit?
-- Patterns across commits: repeated mistakes, inconsistent approaches, missing coordination
-- Branch-scope concerns: API surface changes, migration ordering, test coverage gaps across the whole change
+Focus only on: cross-commit interactions, architectural impact, patterns across commits, branch-scope concerns.
 
 Workspace root: %s
 
-Tools available (all paths relative to workspace root):
-- read_file: read file contents (with optional line range)
-- grep: regex search inside files
-- glob: find files by name pattern (e.g. **/*.go)
-- list_dir: list directory entries
-- git_log: recent commit history
-- git_diff: compare two refs or see changes to a specific file
-- git_blame: see who last modified each line and when
-- git_show: inspect a specific commit
-- fork: split into parallel sub-tasks sharing your current context
+Tools (paths relative to root):
+- read_file, grep, glob, list_dir, git_log, git_diff, git_blame, git_show, fork
 
-Process:
-1. Read the full diff and the prior findings digest
-2. Explore the workspace to understand cross-cutting context
-3. Produce findings ONLY for issues not already covered
+Output MUST be JSON: {"findings": [{"category": "...", "severity": "info|minor|major|critical", "location": "file:line", "description": "...", "evidence": "..."}]}
 
-Your final output MUST be a JSON object with exactly this field:
-{
-  "findings": [{"category": "string", "severity": "info|minor|major|critical", "location": "file:line or section", "description": "what you found", "evidence": "what led you to this"}]
-}
-
-Rules:
-- Focus on cross-cutting concerns the per-commit review could not catch.
-- Never repeat a finding from the prior digest, even rephrased.
-- Be descriptive, never prescriptive.
-- Every finding needs concrete evidence from the diff or codebase.
-- Be concise. Short descriptions, minimal evidence quotes.
-- When you are done exploring, stop calling tools and output ONLY your JSON.`, priorContext, root)
+Rules: never repeat prior findings. Descriptive, not prescriptive. Descriptions under 2 sentences. If no new cross-cutting issues found, return {"findings": []}.`, priorContext, root)
 }
 
 func buildCommitReviewPrompt(root string) string {
-	return fmt.Sprintf(`You are a code review agent. Review the commit diff and produce structured findings.
+	return fmt.Sprintf(`You are a code review agent. Review the commit diff. Be brief — short tool calls, minimal exploration.
 
 Workspace root: %s
 
-Tools available (all paths relative to workspace root):
+Tools (paths relative to root):
 - read_file: read file contents (with optional line range)
-- grep: regex search inside files
-- list_dir: list directory entries
+- grep: regex search
+- list_dir: list directory
 
-Process:
-1. Read the diff
-2. If needed, read one or two changed files for context
-3. Produce your findings
+Process: read the diff, optionally read 1-2 changed files for context, then output findings.
+If the commit is trivial (rename, formatting, comments only), return {"findings": []}.
 
-Your final output MUST be a JSON object with exactly this field:
-{
-  "findings": [{"category": "string", "severity": "info|minor|major|critical", "location": "file:line or section", "description": "what you found", "evidence": "what led you to this"}]
-}
+Output MUST be JSON: {"findings": [{"category": "...", "severity": "info|minor|major|critical", "location": "file:line", "description": "...", "evidence": "..."}]}
 
-Rules:
-- Focus on the CHANGES in the diff, not pre-existing issues.
-- Be descriptive, never prescriptive.
-- Every finding needs concrete evidence from the diff or codebase.
-- Be concise. Short descriptions, minimal evidence quotes.
-- If the commit is trivial (rename, formatting, comments only), return {"findings": []}.
-- When you are done, output ONLY your JSON.`, root)
+Rules: focus on changes only, not pre-existing issues. Be descriptive, not prescriptive. Keep descriptions under 2 sentences. Keep evidence to a single short quote or omit.`, root)
 }
 
 func buildMRReviewPrompt(root string) string {
-	return fmt.Sprintf(`You are a code review agent. Your task is to review a merge request diff and produce structured findings.
+	return fmt.Sprintf(`You are a code review agent. Review the merge request diff. Be brief throughout — short tool calls, concise findings.
 
 Workspace root: %s
 
-Tools available (all paths relative to workspace root):
-- read_file: read file contents (with optional line range)
-- grep: regex search inside files
-- glob: find files by name pattern (e.g. **/*.go)
-- list_dir: list directory entries
-- git_log: recent commit history
-- git_diff: compare two refs or see changes to a specific file
-- git_blame: see who last modified each line and when
-- git_show: inspect a specific commit
-- fork: split into parallel sub-tasks sharing your current context
+Tools (paths relative to root):
+- read_file, grep, glob, list_dir, git_log, git_diff, git_blame, git_show
+- fork: split into parallel sub-tasks
 
 Process:
-1. Analyze the diff provided in the user message
-2. Explore the workspace to understand context: read changed files, grep for related usage, use git_blame/git_diff to understand change history
-3. When you have enough context, use fork to run parallel focused reviews:
-   - One sub-task for correctness and logic errors
-   - One sub-task for security implications
-   - One sub-task for consistency with existing patterns
-   Each fork sub-task should produce its own findings JSON.
-4. Combine fork results into your final output
+1. Read the diff, explore workspace briefly for context
+2. Fork into parallel reviews: correctness, security, consistency
+3. Combine results into final output
 
-Your final output MUST be a JSON object with exactly this field:
-{
-  "findings": [{"category": "string", "severity": "info|minor|major|critical", "location": "file:line or section", "description": "what you found", "evidence": "what led you to this"}]
-}
+Output MUST be JSON: {"findings": [{"category": "...", "severity": "info|minor|major|critical", "location": "file:line", "description": "...", "evidence": "..."}]}
 
-Rules:
-- Focus on the CHANGES in the diff, not pre-existing issues.
-- Be descriptive, never prescriptive. Say what you found, not what to do about it.
-- Every finding needs concrete evidence from the diff or codebase.
-- Pay attention to: missing error handling, broken invariants, inconsistencies with existing patterns, untested edge cases, security implications.
-- Be concise. Short descriptions, minimal evidence quotes.
-- When you are done exploring, stop calling tools and output ONLY your JSON.`, root)
+Rules: focus on changes only. Descriptive, not prescriptive. Descriptions under 2 sentences. Evidence: single short quote or omit.`, root)
 }
 
 func parseLLMOutput(lr *agentcore.LoopResult) (*ReviewResult, error) {
