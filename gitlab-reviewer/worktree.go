@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -28,14 +29,18 @@ func cleanupStaleWorktree(ctx context.Context, absRepo, branchName string) {
 		if line == "branch refs/heads/"+branchName && worktreePath != "" {
 			rmCmd := exec.CommandContext(ctx, "git", "worktree", "remove", "--force", worktreePath)
 			rmCmd.Dir = absRepo
-			rmCmd.Run()
+			if out, err := rmCmd.CombinedOutput(); err != nil {
+				log.Printf("warning: remove stale worktree %s: %v\n%s", worktreePath, err, out)
+			}
 			break
 		}
 	}
 
 	delCmd := exec.CommandContext(ctx, "git", "branch", "-D", branchName)
 	delCmd.Dir = absRepo
-	delCmd.Run()
+	if out, err := delCmd.CombinedOutput(); err != nil {
+		log.Printf("warning: delete stale branch %s: %v\n%s", branchName, err, out)
+	}
 }
 
 func fetchRef(forgeName string, id int64, branchName string) string {
@@ -80,11 +85,15 @@ func CreateWorktree(ctx context.Context, repoPath string, id int64, forgeName st
 	cleanup = func() {
 		rmCmd := exec.Command("git", "worktree", "remove", "--force", dir)
 		rmCmd.Dir = absRepo
-		rmCmd.Run()
+		if out, err := rmCmd.CombinedOutput(); err != nil {
+			log.Printf("warning: remove worktree %s: %v\n%s", dir, err, out)
+		}
 
 		brCmd := exec.Command("git", "branch", "-D", branchName)
 		brCmd.Dir = absRepo
-		brCmd.Run()
+		if out, err := brCmd.CombinedOutput(); err != nil {
+			log.Printf("warning: delete branch %s: %v\n%s", branchName, err, out)
+		}
 	}
 
 	return dir, cleanup, nil
