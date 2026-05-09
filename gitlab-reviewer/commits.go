@@ -8,7 +8,9 @@ import (
 	"strings"
 )
 
-func reviewByCommits(ctx context.Context, forge Forge, reviewer Reviewer, worktreeDir string, pr PullRequest) ([]CommitReviewResult, error) {
+type ProgressFunc func(current, total int, sha, msg string)
+
+func reviewByCommits(ctx context.Context, forge Forge, reviewer Reviewer, worktreeDir string, pr PullRequest, onProgress ...ProgressFunc) ([]CommitReviewResult, error) {
 	commits, err := forge.ListCommits(ctx, pr.ID)
 	if err != nil {
 		return nil, fmt.Errorf("list commits: %w", err)
@@ -50,6 +52,9 @@ func reviewByCommits(ctx context.Context, forge Forge, reviewer Reviewer, worktr
 		}
 
 		log.Printf("  reviewing commit %d/%d: %s %s", i+1, len(commits), sha, msg)
+		if len(onProgress) > 0 && onProgress[0] != nil {
+			onProgress[0](i+1, len(commits), sha, msg)
+		}
 
 		taggedDiff := fmt.Sprintf("Commit: %s — %s\n\n%s", sha, msg, diff)
 		result, err := reviewer.Review(ctx, worktreeDir, taggedDiff)

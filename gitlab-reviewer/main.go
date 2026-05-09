@@ -63,7 +63,10 @@ func main() {
 	}
 
 	m := newModel(forge, newReviewer(cfg), cfg, state)
+	var prog *tea.Program
+	m.programRef = &prog
 	p := tea.NewProgram(m, tea.WithAltScreen())
+	prog = p
 	if _, err := p.Run(); err != nil {
 		log.Fatalf("tui: %v", err)
 	}

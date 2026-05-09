@@ -50,6 +50,7 @@ type prItem struct {
 	err           error
 	selected      bool
 	reviewMode    string
+	progress      string
 }
 
 var modeLabels = []string{"full", "commits", "both"}
@@ -64,11 +65,20 @@ type model struct {
 	reviewer    Reviewer
 	cfg         Config
 	state       *State
+	programRef  **tea.Program
 	quitting    bool
 	message     string
 	pickingMode bool
 	modeChoice  int
 	pickTarget  int
+}
+
+type reviewProgressMsg struct {
+	id      int64
+	current int
+	total   int
+	sha     string
+	message string
 }
 
 type reviewDoneMsg struct {
@@ -208,6 +218,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.items = msg.items
 		m.cursor = 0
 		m.message = fmt.Sprintf("loaded %d MR(s)", len(m.items))
+		return m, nil
+
+	case reviewProgressMsg:
+		for i := range m.items {
+			if m.items[i].pr.ID == msg.id {
+				m.items[i].progress = fmt.Sprintf("commit %d/%d: %s %s", msg.current, msg.total, msg.sha, msg.message)
+				break
+			}
+		}
 		return m, nil
 
 	case reviewDoneMsg:
@@ -354,9 +373,17 @@ func (m model) reviewOne(pr PullRequest, mode string) tea.Cmd {
 		}
 		defer cleanup()
 
+		progress := ProgressFunc(func(current, total int, sha, msg string) {
+			if *m.programRef != nil {
+				(*m.programRef).Send(reviewProgressMsg{
+					id: pr.ID, current: current, total: total, sha: sha, message: msg,
+				})
+			}
+		})
+
 		switch mode {
 		case "both":
-			commitResults, err := reviewByCommits(ctx, m.forge, m.reviewer, worktreeDir, pr)
+			commitResults, err := reviewByCommits(ctx, m.forge, m.reviewer, worktreeDir, pr, progress)
 			if err != nil {
 				return reviewDoneMsg{id: pr.ID, err: err}
 			}
@@ -382,7 +409,7 @@ func (m model) reviewOne(pr PullRequest, mode string) tea.Cmd {
 			return reviewDoneMsg{id: pr.ID, result: merged, commitResults: commitResults, branchResult: branchResult}
 
 		case "commits":
-			commitResults, err := reviewByCommits(ctx, m.forge, m.reviewer, worktreeDir, pr)
+			commitResults, err := reviewByCommits(ctx, m.forge, m.reviewer, worktreeDir, pr, progress)
 			if err != nil {
 				return reviewDoneMsg{id: pr.ID, err: err}
 			}
@@ -648,7 +675,11 @@ func (m model) View() string {
 				detailLines++
 			}
 		case statusReviewing:
-			b.WriteString(statusWarn.Render("  reviewing..."))
+			if item.progress != "" {
+				b.WriteString(statusWarn.Render(fmt.Sprintf("  reviewing — %s", item.progress)))
+			} else {
+				b.WriteString(statusWarn.Render("  reviewing..."))
+			}
 			b.WriteByte('\n')
 			detailLines++
 		case statusError:
