@@ -19,7 +19,7 @@ func main() {
 	configPath := flag.String("config", "", "path to config file")
 	repoPath := flag.String("repo", "", "path to local repo clone")
 	batch := flag.Bool("batch", false, "batch mode: review all unreviewed MRs without TUI")
-	mode := flag.String("mode", "", "review mode: full or commits")
+	mode := flag.String("mode", "", "review mode: full, commits, or both")
 	flag.Parse()
 
 	cfg := loadConfig(*configPath)
@@ -131,7 +131,48 @@ func run(ctx context.Context, cfg Config, state *State, singleMR int64) error {
 		var comment string
 		var result *ReviewResult
 
-		if cfg.ReviewMode == "commits" {
+		switch cfg.ReviewMode {
+		case "both":
+			commitResults, err := reviewByCommits(ctx, forge, reviewer, worktreeDir, pr)
+			if err != nil {
+				cleanup()
+				log.Printf("skip #%d: commit review: %v", pr.ID, err)
+				continue
+			}
+
+			var digest string
+			if llmr, ok := reviewer.(*LLMReviewer); ok {
+				digest, err = digestFindings(ctx, llmr.LLM, llmr.Model, commitResults)
+				if err != nil {
+					log.Printf("#%d: digest failed, using plain fallback: %v", pr.ID, err)
+					digest = digestFindingsPlain(commitResults)
+				}
+			} else {
+				digest = digestFindingsPlain(commitResults)
+			}
+			log.Printf("#%d: digest complete, starting branch repass", pr.ID)
+
+			diff, err := forge.GetDiff(ctx, pr.ID)
+			if err != nil {
+				cleanup()
+				log.Printf("skip #%d: get diff: %v", pr.ID, err)
+				continue
+			}
+			branchResult, err := reviewer.ReviewWithContext(ctx, worktreeDir, diff, digest)
+			cleanup()
+			if err != nil {
+				log.Printf("skip #%d: branch repass: %v", pr.ID, err)
+				continue
+			}
+
+			merged := mergeCommitResults(commitResults)
+			result = &ReviewResult{
+				Findings: append(merged.Findings, branchResult.Findings...),
+				Model:    merged.Model,
+			}
+			comment = FormatBothReviewComment(commitResults, branchResult, pr.Title, merged.Model)
+
+		case "commits":
 			commitResults, err := reviewByCommits(ctx, forge, reviewer, worktreeDir, pr)
 			cleanup()
 			if err != nil {
@@ -140,7 +181,8 @@ func run(ctx context.Context, cfg Config, state *State, singleMR int64) error {
 			}
 			result = mergeCommitResults(commitResults)
 			comment = FormatCommitReviewComment(commitResults, pr.Title, result.Model)
-		} else {
+
+		default:
 			diff, err := forge.GetDiff(ctx, pr.ID)
 			if err != nil {
 				cleanup()

@@ -62,6 +62,95 @@ func (r *LLMReviewer) Review(ctx context.Context, workDir string, diff string) (
 	return result, nil
 }
 
+func (r *LLMReviewer) ReviewWithContext(ctx context.Context, workDir string, diff string, priorContext string) (*ReviewResult, error) {
+	systemPrompt := buildMRRepassPrompt(workDir, priorContext)
+
+	temp := r.Temperature
+	if temp == 0 {
+		temp = 0.3
+	}
+
+	lr, err := agentcore.RunLoop(ctx, r.LLM, agentcore.LoopConfig{
+		ModelID:        r.Model,
+		ContextSize:    r.ContextSize,
+		TokenCeiling:   r.TokenCeiling,
+		Root:           workDir,
+		Temperature:    temp,
+		MaxIter:        12,
+		MaxTokens:      8000,
+		MaxForkDepth:   1,
+		AgentName:      agentName,
+		TracerTag:      "mr-repass",
+		Tools:          agentcore.StandardToolDefs(),
+		ToolDispatcher: agentcore.StandardToolDispatch,
+		Messages: []agentcore.ChatMessage{
+			{Role: "system", Content: systemPrompt},
+			{Role: "user", Content: fmt.Sprintf("Here is the full merge request diff to review:\n\n```diff\n%s\n```\n\nThe prior findings digest above covers what was found per-commit. Focus on cross-cutting concerns only.", diff)},
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	defer lr.Tracer.Close()
+
+	if lr.Truncated {
+		return &ReviewResult{Findings: []Finding{}, Model: r.Model}, nil
+	}
+
+	result, err := parseLLMOutput(lr)
+	if err != nil {
+		return nil, err
+	}
+	result.Model = r.Model
+	return result, nil
+}
+
+func buildMRRepassPrompt(root string, priorContext string) string {
+	return fmt.Sprintf(`You are a code review agent performing a second-pass review of a merge request.
+A first pass already reviewed each commit individually and found these issues:
+
+<prior_findings>
+%s
+</prior_findings>
+
+DO NOT repeat any finding already covered above. Focus exclusively on:
+- Cross-commit interactions: does a change in one commit break an assumption made in another?
+- Architectural impact: does the overall change introduce structural problems not visible per-commit?
+- Patterns across commits: repeated mistakes, inconsistent approaches, missing coordination
+- Branch-scope concerns: API surface changes, migration ordering, test coverage gaps across the whole change
+
+Workspace root: %s
+
+Tools available (all paths relative to workspace root):
+- read_file: read file contents (with optional line range)
+- grep: regex search inside files
+- glob: find files by name pattern (e.g. **/*.go)
+- list_dir: list directory entries
+- git_log: recent commit history
+- git_diff: compare two refs or see changes to a specific file
+- git_blame: see who last modified each line and when
+- git_show: inspect a specific commit
+- fork: split into parallel sub-tasks sharing your current context
+
+Process:
+1. Read the full diff and the prior findings digest
+2. Explore the workspace to understand cross-cutting context
+3. Produce findings ONLY for issues not already covered
+
+Your final output MUST be a JSON object with exactly this field:
+{
+  "findings": [{"category": "string", "severity": "info|minor|major|critical", "location": "file:line or section", "description": "what you found", "evidence": "what led you to this"}]
+}
+
+Rules:
+- Focus on cross-cutting concerns the per-commit review could not catch.
+- Never repeat a finding from the prior digest, even rephrased.
+- Be descriptive, never prescriptive.
+- Every finding needs concrete evidence from the diff or codebase.
+- Be concise. Short descriptions, minimal evidence quotes.
+- When you are done exploring, stop calling tools and output ONLY your JSON.`, priorContext, root)
+}
+
 func buildMRReviewPrompt(root string) string {
 	return fmt.Sprintf(`You are a code review agent. Your task is to review a merge request diff and produce structured findings.
 

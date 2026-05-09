@@ -43,6 +43,7 @@ type prItem struct {
 	status        prStatus
 	result        *ReviewResult
 	commitResults []CommitReviewResult
+	branchResult  *ReviewResult
 	err           error
 	selected      bool
 }
@@ -65,6 +66,7 @@ type reviewDoneMsg struct {
 	id            int64
 	result        *ReviewResult
 	commitResults []CommitReviewResult
+	branchResult  *ReviewResult
 	err           error
 }
 
@@ -190,6 +192,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.items[i].status = statusDone
 					m.items[i].result = msg.result
 					m.items[i].commitResults = msg.commitResults
+					m.items[i].branchResult = msg.branchResult
 					m.state.MarkReviewed(m.cfg.Project, msg.id)
 					m.items[i].reviewed = true
 					m.state.Save()
@@ -302,20 +305,48 @@ func (m model) reviewOne(pr PullRequest) tea.Cmd {
 		}
 		defer cleanup()
 
-		if m.cfg.ReviewMode == "commits" {
+		switch m.cfg.ReviewMode {
+		case "both":
+			commitResults, err := reviewByCommits(ctx, m.forge, m.reviewer, worktreeDir, pr)
+			if err != nil {
+				return reviewDoneMsg{id: pr.ID, err: err}
+			}
+
+			var digest string
+			if llmr, ok := m.reviewer.(*LLMReviewer); ok {
+				digest, _ = digestFindings(ctx, llmr.LLM, llmr.Model, commitResults)
+			} else {
+				digest = digestFindingsPlain(commitResults)
+			}
+
+			diff, err := m.forge.GetDiff(ctx, pr.ID)
+			if err != nil {
+				return reviewDoneMsg{id: pr.ID, err: fmt.Errorf("get diff: %w", err)}
+			}
+			branchResult, err := m.reviewer.ReviewWithContext(ctx, worktreeDir, diff, digest)
+			if err != nil {
+				return reviewDoneMsg{id: pr.ID, err: fmt.Errorf("branch repass: %w", err)}
+			}
+
+			merged := mergeCommitResults(commitResults)
+			merged.Findings = append(merged.Findings, branchResult.Findings...)
+			return reviewDoneMsg{id: pr.ID, result: merged, commitResults: commitResults, branchResult: branchResult}
+
+		case "commits":
 			commitResults, err := reviewByCommits(ctx, m.forge, m.reviewer, worktreeDir, pr)
 			if err != nil {
 				return reviewDoneMsg{id: pr.ID, err: err}
 			}
 			return reviewDoneMsg{id: pr.ID, result: mergeCommitResults(commitResults), commitResults: commitResults}
-		}
 
-		diff, err := m.forge.GetDiff(ctx, pr.ID)
-		if err != nil {
-			return reviewDoneMsg{id: pr.ID, err: fmt.Errorf("get diff: %w", err)}
+		default:
+			diff, err := m.forge.GetDiff(ctx, pr.ID)
+			if err != nil {
+				return reviewDoneMsg{id: pr.ID, err: fmt.Errorf("get diff: %w", err)}
+			}
+			result, err := m.reviewer.Review(ctx, worktreeDir, diff)
+			return reviewDoneMsg{id: pr.ID, result: result, err: err}
 		}
-		result, err := m.reviewer.Review(ctx, worktreeDir, diff)
-		return reviewDoneMsg{id: pr.ID, result: result, err: err}
 	}
 }
 
@@ -326,11 +357,11 @@ func (m model) postSelected() tea.Cmd {
 			continue
 		}
 		m.items[i].selected = false
-		cmds = append(cmds, m.postOne(m.items[i].pr, m.items[i].result, m.items[i].commitResults))
+		cmds = append(cmds, m.postOne(m.items[i]))
 	}
 	if len(cmds) == 0 {
 		if idx, ok := m.cursorIndex(); ok && m.items[idx].status == statusDone && m.items[idx].result != nil {
-			cmds = append(cmds, m.postOne(m.items[idx].pr, m.items[idx].result, m.items[idx].commitResults))
+			cmds = append(cmds, m.postOne(m.items[idx]))
 		}
 	}
 	return tea.Batch(cmds...)
@@ -342,24 +373,26 @@ func (m model) postAll() tea.Cmd {
 		if m.items[i].status != statusDone || m.items[i].result == nil || m.items[i].reviewed {
 			continue
 		}
-		cmds = append(cmds, m.postOne(m.items[i].pr, m.items[i].result, m.items[i].commitResults))
+		cmds = append(cmds, m.postOne(m.items[i]))
 	}
 	return tea.Batch(cmds...)
 }
 
-func (m model) postOne(pr PullRequest, result *ReviewResult, commitResults []CommitReviewResult) tea.Cmd {
+func (m model) postOne(item prItem) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
 		var comment string
-		if len(commitResults) > 0 {
-			comment = FormatCommitReviewComment(commitResults, pr.Title, result.Model)
+		if item.branchResult != nil && len(item.commitResults) > 0 {
+			comment = FormatBothReviewComment(item.commitResults, item.branchResult, item.pr.Title, item.result.Model)
+		} else if len(item.commitResults) > 0 {
+			comment = FormatCommitReviewComment(item.commitResults, item.pr.Title, item.result.Model)
 		} else {
-			comment = FormatComment(result, pr.Title)
+			comment = FormatComment(item.result, item.pr.Title)
 		}
-		if err := m.forge.PostComment(ctx, pr.ID, comment); err != nil {
-			return postDoneMsg{id: pr.ID, err: err}
+		if err := m.forge.PostComment(ctx, item.pr.ID, comment); err != nil {
+			return postDoneMsg{id: item.pr.ID, err: err}
 		}
-		return postDoneMsg{id: pr.ID}
+		return postDoneMsg{id: item.pr.ID}
 	}
 }
 
@@ -513,6 +546,29 @@ func (m model) View() string {
 					b.WriteString(line)
 					b.WriteByte('\n')
 					detailLines++
+				}
+				if item.branchResult != nil && len(item.branchResult.Findings) > 0 && detailLines < detailHeight-1 {
+					sep := dimStyle.Render("  ── branch-level ──")
+					b.WriteString(sep)
+					b.WriteByte('\n')
+					detailLines++
+					for _, f := range item.branchResult.Findings {
+						if detailLines >= detailHeight-1 {
+							break
+						}
+						sev := renderSeverity(f.Severity)
+						loc := ""
+						if f.Location != "" {
+							loc = dimStyle.Render(" " + f.Location)
+						}
+						line := fmt.Sprintf("  %s %s%s — %s", sev, f.Category, loc, f.Description)
+						if len(line) > m.width {
+							line = line[:m.width]
+						}
+						b.WriteString(line)
+						b.WriteByte('\n')
+						detailLines++
+					}
 				}
 			} else {
 				b.WriteString(dimStyle.Render("  no findings"))

@@ -90,5 +90,10 @@ func (c Config) Validate() error {
 	if c.ReviewCommand == "" && c.LLM.URL == "" {
 		return fmt.Errorf("review engine required: set review_command or [llm] url in config")
 	}
+	switch c.ReviewMode {
+	case "", "full", "commits", "both":
+	default:
+		return fmt.Errorf("invalid review_mode %q (valid: full, commits, both)", c.ReviewMode)
+	}
 	return nil
 }

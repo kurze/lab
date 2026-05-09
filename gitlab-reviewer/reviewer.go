@@ -11,6 +11,7 @@ import (
 
 type Reviewer interface {
 	Review(ctx context.Context, workDir string, diff string) (*ReviewResult, error)
+	ReviewWithContext(ctx context.Context, workDir string, diff string, priorContext string) (*ReviewResult, error)
 }
 
 type CommandReviewer struct {
@@ -38,4 +39,9 @@ func (r *CommandReviewer) Review(ctx context.Context, workDir string, diff strin
 
 	result.Model = r.Agent
 	return &result, nil
+}
+
+func (r *CommandReviewer) ReviewWithContext(ctx context.Context, workDir string, diff string, priorContext string) (*ReviewResult, error) {
+	input := fmt.Sprintf("PRIOR FINDINGS DIGEST:\n%s\n\n---\n\n%s", priorContext, diff)
+	return r.Review(ctx, workDir, input)
 }
