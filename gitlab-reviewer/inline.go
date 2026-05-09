@@ -22,10 +22,17 @@ func parseLocation(loc string) (file string, line int, ok bool) {
 	return f, n, true
 }
 
-func routeFindings(findings []Finding) (inline []InlineComment, summary []Finding) {
+var severityRank = map[string]int{"info": 0, "minor": 1, "major": 2, "critical": 3}
+
+func routeFindings(findings []Finding, minSeverity string) (inline []InlineComment, summary []Finding) {
+	if minSeverity == "" {
+		minSeverity = "minor"
+	}
+	minRank := severityRank[strings.ToLower(minSeverity)]
+
 	for _, f := range findings {
 		file, line, ok := parseLocation(f.Location)
-		if !ok {
+		if !ok || severityRank[strings.ToLower(f.Severity)] < minRank {
 			summary = append(summary, f)
 			continue
 		}

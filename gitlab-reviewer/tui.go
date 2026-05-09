@@ -473,16 +473,22 @@ func (m model) postOne(item prItem) tea.Cmd {
 		} else {
 			comment = FormatComment(item.result, item.pr.Title)
 		}
-		if m.cfg.InlineComments && item.result != nil && len(item.result.Findings) > 0 {
-			inlineComments, _ := routeFindings(item.result.Findings)
+		style := m.cfg.CommentStyle
+		if style == "" {
+			style = "summary"
+		}
+		if (style == "inline" || style == "both") && item.result != nil && len(item.result.Findings) > 0 {
+			inlineComments, _ := routeFindings(item.result.Findings, m.cfg.InlineSeverity)
 			if len(inlineComments) > 0 {
 				if err := m.forge.PostInlineComments(ctx, item.pr, inlineComments); err != nil {
 					log.Printf("#%d: inline comments failed: %v", item.pr.ID, err)
 				}
 			}
 		}
-		if err := m.forge.PostComment(ctx, item.pr.ID, comment); err != nil {
-			return postDoneMsg{id: item.pr.ID, err: err}
+		if style == "summary" || style == "both" {
+			if err := m.forge.PostComment(ctx, item.pr.ID, comment); err != nil {
+				return postDoneMsg{id: item.pr.ID, err: err}
+			}
 		}
 		return postDoneMsg{id: item.pr.ID}
 	}

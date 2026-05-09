@@ -27,7 +27,8 @@ type Config struct {
 	RepoPath      string    `toml:"repo_path"`
 	ReviewMode    string    `toml:"review_mode"`
 	LLM           LLMConfig `toml:"llm"`
-	InlineComments bool     `toml:"inline_comments"`
+	CommentStyle   string   `toml:"comment_style"`
+	InlineSeverity string   `toml:"inline_severity"`
 	DryRun         bool     `toml:"-"`
 }
 
@@ -95,6 +96,16 @@ func (c Config) Validate() error {
 	case "", "full", "commits", "both":
 	default:
 		return fmt.Errorf("invalid review_mode %q (valid: full, commits, both)", c.ReviewMode)
+	}
+	switch c.CommentStyle {
+	case "", "summary", "inline", "both":
+	default:
+		return fmt.Errorf("invalid comment_style %q (valid: summary, inline, both)", c.CommentStyle)
+	}
+	switch c.InlineSeverity {
+	case "", "info", "minor", "major", "critical":
+	default:
+		return fmt.Errorf("invalid inline_severity %q (valid: info, minor, major, critical)", c.InlineSeverity)
 	}
 	return nil
 }
