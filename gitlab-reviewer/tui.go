@@ -120,12 +120,17 @@ func (m model) loadList() tea.Cmd {
 		if err != nil {
 			return listLoadedMsg{err: err}
 		}
-		items := make([]prItem, len(prs))
-		for i, pr := range prs {
-			items[i] = prItem{
+		seen := make(map[int64]bool)
+		var items []prItem
+		for _, pr := range prs {
+			if seen[pr.ID] {
+				continue
+			}
+			seen[pr.ID] = true
+			items = append(items, prItem{
 				pr:       pr,
 				reviewed: m.state.IsReviewed(m.cfg.Project, pr.ID),
-			}
+			})
 		}
 		sort.Slice(items, func(i, j int) bool {
 			return items[i].pr.UpdatedAt.After(items[j].pr.UpdatedAt)

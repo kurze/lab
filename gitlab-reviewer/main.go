@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/signal"
@@ -80,6 +81,9 @@ func main() {
 	m := newModel(forge, newReviewer(cfg), cfg, state)
 	var prog *tea.Program
 	m.programRef = &prog
+
+	log.SetOutput(io.Discard)
+	defer log.SetOutput(os.Stderr)
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	prog = p
 	if _, err := p.Run(); err != nil {
