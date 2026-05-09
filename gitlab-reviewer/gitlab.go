@@ -67,6 +67,11 @@ func (g *GitLabClient) Get(_ context.Context, id int64) (PullRequest, error) {
 		ID:     mr.IID,
 		Title:  mr.Title,
 		Author: author,
+		DiffRefs: DiffRefs{
+			BaseSHA:  mr.DiffRefs.BaseSha,
+			HeadSHA:  mr.DiffRefs.HeadSha,
+			StartSHA: mr.DiffRefs.StartSha,
+		},
 	}, nil
 }
 
@@ -114,4 +119,27 @@ func (g *GitLabClient) PostComment(_ context.Context, id int64, body string) err
 		Body: &body,
 	})
 	return err
+}
+
+func (g *GitLabClient) PostInlineComments(_ context.Context, pr PullRequest, comments []InlineComment) error {
+	posType := "text"
+	for _, c := range comments {
+		line := int64(c.Line)
+		_, _, err := g.client.Discussions.CreateMergeRequestDiscussion(g.project, pr.ID, &gitlab.CreateMergeRequestDiscussionOptions{
+			Body: &c.Body,
+			Position: &gitlab.PositionOptions{
+				PositionType: &posType,
+				BaseSHA:      &pr.DiffRefs.BaseSHA,
+				HeadSHA:      &pr.DiffRefs.HeadSHA,
+				StartSHA:     &pr.DiffRefs.StartSHA,
+				NewPath:      &c.File,
+				OldPath:      &c.File,
+				NewLine:      &line,
+			},
+		})
+		if err != nil {
+			return fmt.Errorf("inline comment on %s:%d: %w", c.File, c.Line, err)
+		}
+	}
+	return nil
 }

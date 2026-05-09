@@ -7,10 +7,23 @@ import (
 	"strings"
 )
 
+type DiffRefs struct {
+	BaseSHA  string
+	HeadSHA  string
+	StartSHA string
+}
+
+type InlineComment struct {
+	File string
+	Line int
+	Body string
+}
+
 type PullRequest struct {
-	ID     int64
-	Title  string
-	Author string
+	ID       int64
+	Title    string
+	Author   string
+	DiffRefs DiffRefs
 }
 
 type Commit struct {
@@ -26,6 +39,7 @@ type Forge interface {
 	GetDiff(ctx context.Context, id int64) (string, error)
 	ListCommits(ctx context.Context, id int64) ([]Commit, error)
 	PostComment(ctx context.Context, id int64, body string) error
+	PostInlineComments(ctx context.Context, pr PullRequest, comments []InlineComment) error
 }
 
 func DetectForge(repoPath string) string {

@@ -27,7 +27,8 @@ type Config struct {
 	RepoPath      string    `toml:"repo_path"`
 	ReviewMode    string    `toml:"review_mode"`
 	LLM           LLMConfig `toml:"llm"`
-	DryRun        bool      `toml:"-"`
+	InlineComments bool     `toml:"inline_comments"`
+	DryRun         bool     `toml:"-"`
 }
 
 func loadConfig(path string) Config {

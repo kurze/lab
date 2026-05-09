@@ -100,6 +100,28 @@ func (g *GitHubClient) PostComment(ctx context.Context, id int64, body string) e
 	return err
 }
 
+func (g *GitHubClient) PostInlineComments(ctx context.Context, pr PullRequest, comments []InlineComment) error {
+	if len(comments) == 0 {
+		return nil
+	}
+	event := "COMMENT"
+	side := "RIGHT"
+	draftComments := make([]*github.DraftReviewComment, len(comments))
+	for i, c := range comments {
+		draftComments[i] = &github.DraftReviewComment{
+			Path: &c.File,
+			Line: &c.Line,
+			Side: &side,
+			Body: &c.Body,
+		}
+	}
+	_, _, err := g.client.PullRequests.CreateReview(ctx, g.owner, g.repo, int(pr.ID), &github.PullRequestReviewRequest{
+		Event:    &event,
+		Comments: draftComments,
+	})
+	return err
+}
+
 func splitOwnerRepo(project string) (string, string, error) {
 	parts := strings.SplitN(project, "/", 2)
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {

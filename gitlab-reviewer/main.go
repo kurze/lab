@@ -20,6 +20,7 @@ func main() {
 	repoPath := flag.String("repo", "", "path to local repo clone")
 	batch := flag.Bool("batch", false, "batch mode: review all unreviewed MRs without TUI")
 	mode := flag.String("mode", "", "review mode: full, commits, or both")
+	inline := flag.Bool("inline", false, "post findings as inline comments on the diff")
 	flag.Parse()
 
 	cfg := loadConfig(*configPath)
@@ -32,6 +33,9 @@ func main() {
 	cfg.DryRun = !*post
 	if *mode != "" {
 		cfg.ReviewMode = *mode
+	}
+	if *inline {
+		cfg.InlineComments = true
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -198,7 +202,37 @@ func run(ctx context.Context, cfg Config, state *State, singleMR int64) error {
 			comment = FormatComment(result, pr.Title)
 		}
 
-		if cfg.DryRun {
+		if cfg.InlineComments && len(result.Findings) > 0 {
+			inlineComments, summaryFindings := routeFindings(result.Findings)
+			if cfg.DryRun {
+				fmt.Printf("--- #%d: %s ---\n", pr.ID, pr.Title)
+				if len(inlineComments) > 0 {
+					fmt.Printf("INLINE (%d):\n", len(inlineComments))
+					for _, ic := range inlineComments {
+						fmt.Printf("  %s:%d — %s\n", ic.File, ic.Line, ic.Body)
+					}
+				}
+				if len(summaryFindings) > 0 {
+					fmt.Printf("SUMMARY (%d):\n", len(summaryFindings))
+					for _, f := range summaryFindings {
+						fmt.Printf("  [%s] %s: %s\n", f.Severity, f.Category, f.Description)
+					}
+				}
+				fmt.Println()
+			} else {
+				if len(inlineComments) > 0 {
+					if err := forge.PostInlineComments(ctx, pr, inlineComments); err != nil {
+						log.Printf("#%d: inline comments failed, falling back to summary: %v", pr.ID, err)
+					} else {
+						log.Printf("#%d: posted %d inline comment(s)", pr.ID, len(inlineComments))
+					}
+				}
+				if err := forge.PostComment(ctx, pr.ID, comment); err != nil {
+					log.Printf("skip #%d: post comment: %v", pr.ID, err)
+					continue
+				}
+			}
+		} else if cfg.DryRun {
 			fmt.Printf("--- #%d: %s ---\n%s\n\n", pr.ID, pr.Title, comment)
 		} else {
 			if err := forge.PostComment(ctx, pr.ID, comment); err != nil {

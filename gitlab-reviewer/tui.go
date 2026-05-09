@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -388,6 +389,14 @@ func (m model) postOne(item prItem) tea.Cmd {
 			comment = FormatCommitReviewComment(item.commitResults, item.pr.Title, item.result.Model)
 		} else {
 			comment = FormatComment(item.result, item.pr.Title)
+		}
+		if m.cfg.InlineComments && item.result != nil && len(item.result.Findings) > 0 {
+			inlineComments, _ := routeFindings(item.result.Findings)
+			if len(inlineComments) > 0 {
+				if err := m.forge.PostInlineComments(ctx, item.pr, inlineComments); err != nil {
+					log.Printf("#%d: inline comments failed: %v", item.pr.ID, err)
+				}
+			}
 		}
 		if err := m.forge.PostComment(ctx, item.pr.ID, comment); err != nil {
 			return postDoneMsg{id: item.pr.ID, err: err}
