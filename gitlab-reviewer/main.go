@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/kurze/lab/agentcore"
@@ -21,6 +22,7 @@ func main() {
 	batch := flag.Bool("batch", false, "batch mode: review all unreviewed MRs without TUI")
 	mode := flag.String("mode", "", "review mode: full, commits, or both")
 	inline := flag.Bool("inline", false, "post findings as inline comments on the diff")
+	branch := flag.String("branch", "", "review a local branch (commits since base branch)")
 	flag.Parse()
 
 	cfg := loadConfig(*configPath)
@@ -36,6 +38,19 @@ func main() {
 	}
 	if *inline {
 		cfg.InlineComments = true
+	}
+
+	if *branch != "" {
+		if cfg.ReviewCommand == "" && cfg.LLM.URL == "" {
+			fmt.Fprintf(os.Stderr, "error: review engine required: set review_command or [llm] url in config\n")
+			os.Exit(1)
+		}
+		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+		defer cancel()
+		if err := runBranch(ctx, cfg, *branch); err != nil {
+			log.Fatalf("error: %v", err)
+		}
+		return
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -70,6 +85,110 @@ func main() {
 	if _, err := p.Run(); err != nil {
 		log.Fatalf("tui: %v", err)
 	}
+}
+
+func runBranch(ctx context.Context, cfg Config, branchName string) error {
+	baseBranch := detectBaseBranch(cfg.RepoPath)
+	reviewer := newReviewer(cfg)
+
+	commits, err := branchCommits(cfg.RepoPath, branchName, baseBranch)
+	if err != nil {
+		return fmt.Errorf("list branch commits: %w", err)
+	}
+	if len(commits) == 0 {
+		log.Printf("no commits found on %s since %s", branchName, baseBranch)
+		return nil
+	}
+
+	log.Printf("branch %s: %d commit(s) since %s", branchName, len(commits), baseBranch)
+
+	mode := cfg.ReviewMode
+	if mode == "" {
+		mode = "full"
+	}
+
+	pr := PullRequest{
+		Title:  fmt.Sprintf("branch: %s", branchName),
+		Author: "local",
+	}
+
+	var result *ReviewResult
+	var comment string
+
+	switch mode {
+	case "commits", "both":
+		var commitResults []CommitReviewResult
+		for i, commit := range commits {
+			sha := commit.SHA
+			if len(sha) > 8 {
+				sha = sha[:8]
+			}
+			msg := commit.Message
+			if idx := strings.IndexByte(msg, '\n'); idx > 0 {
+				msg = msg[:idx]
+			}
+			log.Printf("  reviewing commit %d/%d: %s %s", i+1, len(commits), sha, msg)
+
+			diff, err := commitDiff(cfg.RepoPath, commit.SHA)
+			if err != nil {
+				log.Printf("  skip commit %s: %v", sha, err)
+				continue
+			}
+			if strings.TrimSpace(diff) == "" {
+				continue
+			}
+
+			taggedDiff := fmt.Sprintf("Commit: %s — %s\n\n%s", sha, msg, diff)
+			r, err := reviewer.Review(ctx, cfg.RepoPath, taggedDiff)
+			if err != nil {
+				log.Printf("  commit %s review failed: %v", sha, err)
+				continue
+			}
+			commitResults = append(commitResults, CommitReviewResult{Commit: commit, Result: r})
+		}
+
+		if mode == "both" {
+			var digest string
+			if llmr, ok := reviewer.(*LLMReviewer); ok {
+				digest, _ = digestFindings(ctx, llmr.LLM, llmr.Model, commitResults)
+			} else {
+				digest = digestFindingsPlain(commitResults)
+			}
+
+			diff, err := branchDiff(cfg.RepoPath, branchName, baseBranch)
+			if err != nil {
+				return fmt.Errorf("branch diff: %w", err)
+			}
+			branchResult, err := reviewer.ReviewWithContext(ctx, cfg.RepoPath, diff, digest)
+			if err != nil {
+				return fmt.Errorf("branch repass: %w", err)
+			}
+
+			merged := mergeCommitResults(commitResults)
+			result = &ReviewResult{
+				Findings: append(merged.Findings, branchResult.Findings...),
+				Model:    merged.Model,
+			}
+			comment = FormatBothReviewComment(commitResults, branchResult, pr.Title, merged.Model)
+		} else {
+			result = mergeCommitResults(commitResults)
+			comment = FormatCommitReviewComment(commitResults, pr.Title, result.Model)
+		}
+
+	default:
+		diff, err := branchDiff(cfg.RepoPath, branchName, baseBranch)
+		if err != nil {
+			return fmt.Errorf("branch diff: %w", err)
+		}
+		result, err = reviewer.Review(ctx, cfg.RepoPath, diff)
+		if err != nil {
+			return fmt.Errorf("review: %w", err)
+		}
+		comment = FormatComment(result, pr.Title)
+	}
+
+	fmt.Printf("--- %s (%d finding(s)) ---\n%s\n", branchName, len(result.Findings), comment)
+	return nil
 }
 
 func newReviewer(cfg Config) Reviewer {
