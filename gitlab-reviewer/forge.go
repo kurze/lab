@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 type DiffRefs struct {
@@ -20,10 +21,11 @@ type InlineComment struct {
 }
 
 type PullRequest struct {
-	ID       int64
-	Title    string
-	Author   string
-	DiffRefs DiffRefs
+	ID        int64
+	Title     string
+	Author    string
+	DiffRefs  DiffRefs
+	UpdatedAt time.Time
 }
 
 type Commit struct {

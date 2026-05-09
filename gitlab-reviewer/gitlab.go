@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	gitlab "gitlab.com/gitlab-org/api/client-go"
 )
@@ -45,10 +46,15 @@ func (g *GitLabClient) ListAll(_ context.Context) ([]PullRequest, error) {
 		if mr.Author != nil {
 			author = mr.Author.Username
 		}
+		var updatedAt time.Time
+		if mr.UpdatedAt != nil {
+			updatedAt = *mr.UpdatedAt
+		}
 		result = append(result, PullRequest{
-			ID:     mr.IID,
-			Title:  mr.Title,
-			Author: author,
+			ID:        mr.IID,
+			Title:     mr.Title,
+			Author:    author,
+			UpdatedAt: updatedAt,
 		})
 	}
 	return result, nil
@@ -63,10 +69,15 @@ func (g *GitLabClient) Get(_ context.Context, id int64) (PullRequest, error) {
 	if mr.Author != nil {
 		author = mr.Author.Username
 	}
+	var updatedAt time.Time
+	if mr.UpdatedAt != nil {
+		updatedAt = *mr.UpdatedAt
+	}
 	return PullRequest{
-		ID:     mr.IID,
-		Title:  mr.Title,
-		Author: author,
+		ID:        mr.IID,
+		Title:     mr.Title,
+		Author:    author,
+		UpdatedAt: updatedAt,
 		DiffRefs: DiffRefs{
 			BaseSHA:  mr.DiffRefs.BaseSha,
 			HeadSHA:  mr.DiffRefs.HeadSha,

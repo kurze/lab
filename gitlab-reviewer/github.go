@@ -48,9 +48,10 @@ func (g *GitHubClient) ListAll(ctx context.Context) ([]PullRequest, error) {
 	var result []PullRequest
 	for _, pr := range prs {
 		result = append(result, PullRequest{
-			ID:     int64(pr.GetNumber()),
-			Title:  pr.GetTitle(),
-			Author: pr.GetUser().GetLogin(),
+			ID:        int64(pr.GetNumber()),
+			Title:     pr.GetTitle(),
+			Author:    pr.GetUser().GetLogin(),
+			UpdatedAt: pr.GetUpdatedAt().Time,
 		})
 	}
 	return result, nil
@@ -62,9 +63,10 @@ func (g *GitHubClient) Get(ctx context.Context, id int64) (PullRequest, error) {
 		return PullRequest{}, err
 	}
 	return PullRequest{
-		ID:     int64(pr.GetNumber()),
-		Title:  pr.GetTitle(),
-		Author: pr.GetUser().GetLogin(),
+		ID:        int64(pr.GetNumber()),
+		Title:     pr.GetTitle(),
+		Author:    pr.GetUser().GetLogin(),
+		UpdatedAt: pr.GetUpdatedAt().Time,
 	}, nil
 }
 

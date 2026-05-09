@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"sort"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -108,6 +110,9 @@ func (m model) loadList() tea.Cmd {
 				reviewed: m.state.IsReviewed(m.cfg.Project, pr.ID),
 			}
 		}
+		sort.Slice(items, func(i, j int) bool {
+			return items[i].pr.UpdatedAt.After(items[j].pr.UpdatedAt)
+		})
 		return listLoadedMsg{items: items}
 	}
 }
@@ -506,8 +511,9 @@ func (m model) View() string {
 			reviewedMark = dimStyle.Render("R")
 		}
 
-		line := fmt.Sprintf("%s %s %s #%-5d %-15s %s",
-			prefix, statusIcon, reviewedMark, item.pr.ID, item.pr.Author, item.pr.Title)
+		age := relativeTime(item.pr.UpdatedAt)
+		line := fmt.Sprintf("%s %s %s #%-5d %-15s %-6s %s",
+			prefix, statusIcon, reviewedMark, item.pr.ID, item.pr.Author, age, item.pr.Title)
 
 		if len(line) > m.width {
 			line = line[:m.width]
@@ -616,6 +622,23 @@ func (m model) View() string {
 	b.WriteString(actionBar.Render(bar))
 
 	return b.String()
+}
+
+func relativeTime(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	d := time.Since(t)
+	switch {
+	case d < time.Minute:
+		return "now"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%dd", int(d.Hours()/24))
+	}
 }
 
 func renderSeverity(sev string) string {
