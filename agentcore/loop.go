@@ -2,8 +2,10 @@ package agentcore
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -24,9 +26,12 @@ type LoopConfig struct {
 	Messages       []ChatMessage
 	Tools          []any
 	ToolDispatcher func(root string, tc LLMTool, contextPulled *[]string, seen map[string]bool) ToolResult
+	LLM            *LLMClient
 	Temperature    float64
 	MaxIter        int
 	MaxTokens      int
+	MaxForkDepth   int
+	MaxForkIter    int
 	AgentName      string
 	TracerTag      string
 	NudgeMessage   string
@@ -71,6 +76,12 @@ func (cfg *LoopConfig) defaults() {
 }
 
 func RunLoop(ctx context.Context, llm *LLMClient, cfg LoopConfig) (lr *LoopResult, retErr error) {
+	if llm == nil {
+		llm = cfg.LLM
+	}
+	if cfg.LLM == nil {
+		cfg.LLM = llm
+	}
 	cfg.defaults()
 
 	start := time.Now()
@@ -95,6 +106,11 @@ func RunLoop(ctx context.Context, llm *LLMClient, cfg LoopConfig) (lr *LoopResul
 		tracer.Log(TraceEntry{Iteration: 0, Role: m.Role, Content: m.Content})
 	}
 
+	tools := cfg.Tools
+	if cfg.MaxForkDepth > 0 {
+		tools = append(append([]any{}, tools...), forkToolDef())
+	}
+
 	var contextPulled []string
 	agentsMDSeen := make(map[string]bool)
 	var lastToolSig string
@@ -108,7 +124,7 @@ func RunLoop(ctx context.Context, llm *LLMClient, cfg LoopConfig) (lr *LoopResul
 		req := ChatRequest{
 			Model:       cfg.ModelID,
 			Messages:    messages,
-			Tools:       cfg.Tools,
+			Tools:       tools,
 			Temperature: cfg.Temperature,
 			MaxTokens:   cfg.MaxTokens,
 		}
@@ -182,7 +198,12 @@ func RunLoop(ctx context.Context, llm *LLMClient, cfg LoopConfig) (lr *LoopResul
 		messages = append(messages, ChatMessage{Role: "assistant", Content: msg.Content, ToolCalls: msg.ToolCalls})
 
 		for _, tc := range msg.ToolCalls {
-			result := cfg.ToolDispatcher(cfg.Root, tc, &contextPulled, agentsMDSeen)
+			var result ToolResult
+			if tc.Function.Name == "fork" && cfg.MaxForkDepth > 0 {
+				result = execFork(ctx, llm, cfg, messages, tc, agentsMDSeen)
+			} else {
+				result = cfg.ToolDispatcher(cfg.Root, tc, &contextPulled, agentsMDSeen)
+			}
 			tracer.Log(TraceEntry{Iteration: iter, Role: "tool", Content: result.Content, ToolResults: tc.ID})
 			messages = append(messages, ChatMessage{
 				Role:       "tool",
@@ -207,6 +228,142 @@ func EstimateTokens(messages []ChatMessage) int {
 		}
 	}
 	return total / 4
+}
+
+func forkToolDef() any {
+	return map[string]any{
+		"type": "function",
+		"function": map[string]any{
+			"name":        "fork",
+			"description": "Fork the current context into multiple parallel sub-tasks. All sub-tasks inherit your current conversation history and run concurrently. Use this when you have gathered enough context and want to analyze it from multiple angles simultaneously. Provide ALL sub-tasks in a single call.",
+			"parameters": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"tasks": map[string]any{
+						"type": "array",
+						"items": map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"id":     map[string]any{"type": "string", "description": "Short identifier for this sub-task (e.g. 'security', 'perf')"},
+								"prompt": map[string]any{"type": "string", "description": "What this sub-task should focus on and produce"},
+							},
+							"required": []string{"id", "prompt"},
+						},
+						"minItems": 2,
+						"description": "Sub-tasks to run in parallel. Each inherits the full conversation context.",
+					},
+				},
+				"required": []string{"tasks"},
+			},
+		},
+	}
+}
+
+type forkTask struct {
+	ID     string `json:"id"`
+	Prompt string `json:"prompt"`
+}
+
+func execFork(ctx context.Context, llm *LLMClient, parentCfg LoopConfig, currentMessages []ChatMessage, tc LLMTool, agentsMDSeen map[string]bool) ToolResult {
+	var args struct {
+		Tasks []forkTask `json:"tasks"`
+	}
+	if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
+		return ToolResult{Content: fmt.Sprintf("invalid fork arguments: %s", err), IsError: true}
+	}
+	if len(args.Tasks) < 2 {
+		return ToolResult{Content: "fork requires at least 2 tasks", IsError: true}
+	}
+
+	maxIter := parentCfg.MaxForkIter
+	if maxIter <= 0 {
+		maxIter = parentCfg.MaxIter
+	}
+
+	type forkResult struct {
+		id      string
+		content string
+		err     error
+	}
+
+	results := make([]forkResult, len(args.Tasks))
+	var wg sync.WaitGroup
+
+	for i, task := range args.Tasks {
+		wg.Add(1)
+		go func(idx int, t forkTask) {
+			defer wg.Done()
+
+			childMessages := cloneMessages(currentMessages)
+			childMessages = append(childMessages, ChatMessage{Role: "user", Content: t.Prompt})
+
+			childSeen := make(map[string]bool, len(agentsMDSeen))
+			for k, v := range agentsMDSeen {
+				childSeen[k] = v
+			}
+
+			childCfg := LoopConfig{
+				ModelID:        parentCfg.ModelID,
+				ContextSize:    parentCfg.ContextSize,
+				TokenCeiling:   parentCfg.TokenCeiling,
+				Root:           parentCfg.Root,
+				Messages:       childMessages,
+				Tools:          parentCfg.Tools,
+				ToolDispatcher: parentCfg.ToolDispatcher,
+				LLM:            llm,
+				Temperature:    parentCfg.Temperature,
+				MaxIter:        maxIter,
+				MaxTokens:      parentCfg.MaxTokens,
+				MaxForkDepth:   parentCfg.MaxForkDepth - 1,
+				MaxForkIter:    parentCfg.MaxForkIter,
+				AgentName:      parentCfg.AgentName,
+				TracerTag:      parentCfg.TracerTag + "-fork-" + t.ID,
+				NudgeMessage:   parentCfg.NudgeMessage,
+				StuckThreshold: parentCfg.StuckThreshold,
+				PerIterTimeout: parentCfg.PerIterTimeout,
+				TotalTimeout:   parentCfg.TotalTimeout,
+			}
+
+			lr, err := RunLoop(ctx, llm, childCfg)
+			if err != nil {
+				results[idx] = forkResult{id: t.ID, err: err}
+				return
+			}
+			defer lr.Tracer.Close()
+			results[idx] = forkResult{id: t.ID, content: lr.FinalMessage.Content}
+		}(i, task)
+	}
+
+	wg.Wait()
+
+	var b strings.Builder
+	for _, r := range results {
+		fmt.Fprintf(&b, "=== fork: %s ===\n", r.id)
+		if r.err != nil {
+			fmt.Fprintf(&b, "error: %v\n", r.err)
+		} else {
+			b.WriteString(r.content)
+			b.WriteByte('\n')
+		}
+		b.WriteByte('\n')
+	}
+	return ToolResult{Content: b.String()}
+}
+
+func cloneMessages(msgs []ChatMessage) []ChatMessage {
+	out := make([]ChatMessage, len(msgs))
+	for i, m := range msgs {
+		out[i] = ChatMessage{
+			Role:       m.Role,
+			Content:    m.Content,
+			ToolCallID: m.ToolCallID,
+		}
+		if len(m.ToolCalls) > 0 {
+			out[i].ToolCalls = make([]LLMTool, len(m.ToolCalls))
+			copy(out[i].ToolCalls, m.ToolCalls)
+		}
+	}
+	return out
 }
 
 func CompactMessages(messages []ChatMessage, contextSize int) []ChatMessage {
