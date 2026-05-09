@@ -10,7 +10,13 @@ import (
 
 type ProgressFunc func(current, total int, sha, msg string)
 
-func reviewByCommits(ctx context.Context, forge Forge, reviewer Reviewer, worktreeDir string, pr PullRequest, onProgress ...ProgressFunc) ([]CommitReviewResult, error) {
+type ReviewByCommitsOpts struct {
+	State      *State
+	Project    string
+	OnProgress ProgressFunc
+}
+
+func reviewByCommits(ctx context.Context, forge Forge, reviewer Reviewer, worktreeDir string, pr PullRequest, opts *ReviewByCommitsOpts) ([]CommitReviewResult, error) {
 	commits, err := forge.ListCommits(ctx, pr.ID)
 	if err != nil {
 		return nil, fmt.Errorf("list commits: %w", err)
@@ -26,6 +32,11 @@ func reviewByCommits(ctx context.Context, forge Forge, reviewer Reviewer, worktr
 		case <-ctx.Done():
 			return results, ctx.Err()
 		default:
+		}
+
+		if opts != nil && opts.State != nil && opts.State.IsCommitReviewed(opts.Project, commit.SHA) {
+			log.Printf("  skip already reviewed commit %d/%d: %s", i+1, len(commits), commit.SHA[:8])
+			continue
 		}
 
 		if isMergeCommit(worktreeDir, commit.SHA) {
@@ -52,8 +63,8 @@ func reviewByCommits(ctx context.Context, forge Forge, reviewer Reviewer, worktr
 		}
 
 		log.Printf("  reviewing commit %d/%d: %s %s", i+1, len(commits), sha, msg)
-		if len(onProgress) > 0 && onProgress[0] != nil {
-			onProgress[0](i+1, len(commits), sha, msg)
+		if opts != nil && opts.OnProgress != nil {
+			opts.OnProgress(i+1, len(commits), sha, msg)
 		}
 
 		taggedDiff := fmt.Sprintf("Commit: %s — %s\n\n%s", sha, msg, diff)
@@ -67,6 +78,9 @@ func reviewByCommits(ctx context.Context, forge Forge, reviewer Reviewer, worktr
 			Commit: commit,
 			Result: result,
 		})
+		if opts != nil && opts.State != nil {
+			opts.State.MarkCommitReviewed(opts.Project, commit.SHA)
+		}
 	}
 
 	return results, nil

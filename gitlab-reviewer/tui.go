@@ -391,7 +391,7 @@ func (m model) reviewOne(pr PullRequest, mode string) tea.Cmd {
 
 		switch mode {
 		case "both":
-			commitResults, err := reviewByCommits(ctx, m.forge, m.reviewer, worktreeDir, pr, progress)
+			commitResults, err := reviewByCommits(ctx, m.forge, m.reviewer, worktreeDir, pr, &ReviewByCommitsOpts{State: m.state, Project: m.cfg.Project, OnProgress: progress})
 			if err != nil {
 				return reviewDoneMsg{id: pr.ID, err: err}
 			}
@@ -417,7 +417,7 @@ func (m model) reviewOne(pr PullRequest, mode string) tea.Cmd {
 			return reviewDoneMsg{id: pr.ID, result: merged, commitResults: commitResults, branchResult: branchResult}
 
 		case "commits":
-			commitResults, err := reviewByCommits(ctx, m.forge, m.reviewer, worktreeDir, pr, progress)
+			commitResults, err := reviewByCommits(ctx, m.forge, m.reviewer, worktreeDir, pr, &ReviewByCommitsOpts{State: m.state, Project: m.cfg.Project, OnProgress: progress})
 			if err != nil {
 				return reviewDoneMsg{id: pr.ID, err: err}
 			}

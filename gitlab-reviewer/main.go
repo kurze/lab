@@ -259,7 +259,7 @@ func run(ctx context.Context, cfg Config, state *State, singleMR int64) error {
 
 		switch cfg.ReviewMode {
 		case "both":
-			commitResults, err := reviewByCommits(ctx, forge, reviewer, worktreeDir, pr)
+			commitResults, err := reviewByCommits(ctx, forge, reviewer, worktreeDir, pr, &ReviewByCommitsOpts{State: state, Project: cfg.Project})
 			if err != nil {
 				cleanup()
 				log.Printf("skip #%d: commit review: %v", pr.ID, err)
@@ -299,7 +299,7 @@ func run(ctx context.Context, cfg Config, state *State, singleMR int64) error {
 			comment = FormatBothReviewComment(commitResults, branchResult, pr.Title, merged.Model)
 
 		case "commits":
-			commitResults, err := reviewByCommits(ctx, forge, reviewer, worktreeDir, pr)
+			commitResults, err := reviewByCommits(ctx, forge, reviewer, worktreeDir, pr, &ReviewByCommitsOpts{State: state, Project: cfg.Project})
 			cleanup()
 			if err != nil {
 				log.Printf("skip #%d: review: %v", pr.ID, err)

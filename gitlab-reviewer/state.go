@@ -9,8 +9,9 @@ import (
 )
 
 type State struct {
-	Reviewed map[string]map[string]time.Time `json:"reviewed"`
-	path     string
+	Reviewed        map[string]map[string]time.Time `json:"reviewed"`
+	ReviewedCommits map[string]map[string]time.Time `json:"reviewed_commits,omitempty"`
+	path            string
 }
 
 func defaultStatePath() string {
@@ -25,8 +26,9 @@ func LoadState(path string) (*State, error) {
 		path = defaultStatePath()
 	}
 	s := &State{
-		Reviewed: make(map[string]map[string]time.Time),
-		path:     path,
+		Reviewed:        make(map[string]map[string]time.Time),
+		ReviewedCommits: make(map[string]map[string]time.Time),
+		path:            path,
 	}
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
@@ -56,6 +58,25 @@ func (s *State) MarkReviewed(project string, id int64) {
 		s.Reviewed[project] = make(map[string]time.Time)
 	}
 	s.Reviewed[project][fmt.Sprintf("%d", id)] = time.Now()
+}
+
+func (s *State) IsCommitReviewed(project, sha string) bool {
+	proj, ok := s.ReviewedCommits[project]
+	if !ok {
+		return false
+	}
+	_, ok = proj[sha]
+	return ok
+}
+
+func (s *State) MarkCommitReviewed(project, sha string) {
+	if s.ReviewedCommits == nil {
+		s.ReviewedCommits = make(map[string]map[string]time.Time)
+	}
+	if s.ReviewedCommits[project] == nil {
+		s.ReviewedCommits[project] = make(map[string]time.Time)
+	}
+	s.ReviewedCommits[project][sha] = time.Now()
 }
 
 func (s *State) Save() error {
