@@ -134,7 +134,10 @@ func (g *GitLabClient) PostComment(_ context.Context, id int64, body string) err
 
 func (g *GitLabClient) PostInlineComments(_ context.Context, pr PullRequest, comments []InlineComment) error {
 	posType := "text"
-	for _, c := range comments {
+	for i, c := range comments {
+		if i > 0 {
+			time.Sleep(200 * time.Millisecond)
+		}
 		line := int64(c.Line)
 		_, _, err := g.client.Discussions.CreateMergeRequestDiscussion(g.project, pr.ID, &gitlab.CreateMergeRequestDiscussionOptions{
 			Body: &c.Body,
