@@ -25,10 +25,7 @@ func digestFindings(ctx context.Context, llm *agentcore.LLMClient, model string,
 		if len(sha) > 8 {
 			sha = sha[:8]
 		}
-		msg := cr.Commit.Message
-		if idx := strings.IndexByte(msg, '\n'); idx > 0 {
-			msg = msg[:idx]
-		}
+		msg := firstline(cr.Commit.Message)
 		inputs = append(inputs, digestInput{
 			Commit:   sha,
 			Message:  msg,
@@ -82,10 +79,7 @@ func digestFindingsPlain(commitResults []CommitReviewResult) string {
 		if len(sha) > 8 {
 			sha = sha[:8]
 		}
-		msg := cr.Commit.Message
-		if idx := strings.IndexByte(msg, '\n'); idx > 0 {
-			msg = msg[:idx]
-		}
+		msg := firstline(cr.Commit.Message)
 		fmt.Fprintf(&b, "Commit %s (%s):\n", sha, msg)
 		for _, f := range cr.Result.Findings {
 			fmt.Fprintf(&b, "  - [%s] %s: %s", f.Severity, f.Category, f.Description)

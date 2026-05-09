@@ -57,10 +57,7 @@ func reviewByCommits(ctx context.Context, forge Forge, reviewer Reviewer, worktr
 		if len(sha) > 8 {
 			sha = sha[:8]
 		}
-		msg := commit.Message
-		if idx := strings.IndexByte(msg, '\n'); idx > 0 {
-			msg = msg[:idx]
-		}
+		msg := firstline(commit.Message)
 
 		log.Printf("  reviewing commit %d/%d: %s %s", i+1, len(commits), sha, msg)
 		if opts != nil && opts.OnProgress != nil {
