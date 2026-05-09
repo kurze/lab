@@ -207,7 +207,7 @@ func newReviewer(cfg Config) Reviewer {
 func run(ctx context.Context, cfg Config, state *State, singleMR int64) error {
 	forge, err := NewForge(cfg)
 	if err != nil {
-		return fmt.Errorf("%s client: %w", forge.Name(), err)
+		return fmt.Errorf("%s forge client: %w", cfg.ForgeType, err)
 	}
 
 	log.Printf("using %s forge", forge.Name())
