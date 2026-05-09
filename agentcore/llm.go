@@ -82,7 +82,10 @@ func (c *LLMClient) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, e
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(resp.Body)
+		b, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			return nil, fmt.Errorf("LLM returned %d (body unreadable: %w)", resp.StatusCode, readErr)
+		}
 		return nil, fmt.Errorf("LLM returned %d: %s", resp.StatusCode, string(b))
 	}
 
