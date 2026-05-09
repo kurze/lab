@@ -625,9 +625,8 @@ func summarizeBlame(porcelain string) string {
 			current.author = strings.TrimPrefix(raw, "author ")
 		case strings.HasPrefix(raw, "author-time "):
 			ts := strings.TrimPrefix(raw, "author-time ")
-			if t, err := fmt.Sscanf(ts, "%d", new(int64)); err == nil && t > 0 {
-				var unix int64
-				fmt.Sscanf(ts, "%d", &unix)
+			var unix int64
+			if _, err := fmt.Sscanf(ts, "%d", &unix); err == nil {
 				current.date = fmt.Sprintf("%d", unix)
 			}
 		case strings.HasPrefix(raw, "\t"):
