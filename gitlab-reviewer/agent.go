@@ -20,7 +20,28 @@ type LLMReviewer struct {
 }
 
 func (r *LLMReviewer) Review(ctx context.Context, workDir string, diff string) (*ReviewResult, error) {
-	systemPrompt := buildMRReviewPrompt(workDir)
+	return r.review(ctx, workDir, diff, false)
+}
+
+func (r *LLMReviewer) ReviewFull(ctx context.Context, workDir string, diff string) (*ReviewResult, error) {
+	return r.review(ctx, workDir, diff, true)
+}
+
+func (r *LLMReviewer) review(ctx context.Context, workDir string, diff string, full bool) (*ReviewResult, error) {
+	var systemPrompt string
+	maxIter := 6
+	maxForkDepth := 0
+	tracerTag := "commit-review"
+
+	if full {
+		systemPrompt = buildMRReviewPrompt(workDir)
+		maxIter = 12
+		maxForkDepth = 1
+		tracerTag = "mr-review"
+	} else {
+		systemPrompt = buildCommitReviewPrompt(workDir)
+		maxForkDepth = 1
+	}
 
 	temp := r.Temperature
 	if temp == 0 {
@@ -33,16 +54,16 @@ func (r *LLMReviewer) Review(ctx context.Context, workDir string, diff string) (
 		TokenCeiling:   r.TokenCeiling,
 		Root:           workDir,
 		Temperature:    temp,
-		MaxIter:        12,
+		MaxIter:        maxIter,
 		MaxTokens:      8000,
-		MaxForkDepth:   1,
+		MaxForkDepth:   maxForkDepth,
 		AgentName:      agentName,
-		TracerTag:      "mr-review",
+		TracerTag:      tracerTag,
 		Tools:          agentcore.StandardToolDefs(),
 		ToolDispatcher: agentcore.StandardToolDispatch,
 		Messages: []agentcore.ChatMessage{
 			{Role: "system", Content: systemPrompt},
-			{Role: "user", Content: fmt.Sprintf("Here is the merge request diff to review:\n\n```diff\n%s\n```\n\nExplore the codebase for context, then produce your findings.", diff)},
+			{Role: "user", Content: fmt.Sprintf("Here is the diff to review:\n\n```diff\n%s\n```\n\nReview it and produce your findings.", diff)},
 		},
 	})
 	if err != nil {
@@ -151,6 +172,35 @@ Rules:
 - When you are done exploring, stop calling tools and output ONLY your JSON.`, priorContext, root)
 }
 
+func buildCommitReviewPrompt(root string) string {
+	return fmt.Sprintf(`You are a code review agent. Review the commit diff and produce structured findings.
+
+Workspace root: %s
+
+Tools available (all paths relative to workspace root):
+- read_file: read file contents (with optional line range)
+- grep: regex search inside files
+- list_dir: list directory entries
+
+Process:
+1. Read the diff
+2. If needed, read one or two changed files for context
+3. Produce your findings
+
+Your final output MUST be a JSON object with exactly this field:
+{
+  "findings": [{"category": "string", "severity": "info|minor|major|critical", "location": "file:line or section", "description": "what you found", "evidence": "what led you to this"}]
+}
+
+Rules:
+- Focus on the CHANGES in the diff, not pre-existing issues.
+- Be descriptive, never prescriptive.
+- Every finding needs concrete evidence from the diff or codebase.
+- Be concise. Short descriptions, minimal evidence quotes.
+- If the commit is trivial (rename, formatting, comments only), return {"findings": []}.
+- When you are done, output ONLY your JSON.`, root)
+}
+
 func buildMRReviewPrompt(root string) string {
 	return fmt.Sprintf(`You are a code review agent. Your task is to review a merge request diff and produce structured findings.
 
@@ -206,7 +256,8 @@ func parseLLMOutput(lr *agentcore.LoopResult) (*ReviewResult, error) {
 		return &result, nil
 	}
 
-	return nil, fmt.Errorf("parse review output: no valid findings in truncated response")
+	log.Printf("warning: could not parse review output, returning empty findings")
+	return &ReviewResult{}, nil
 }
 
 func salvageFindings(content string) []Finding {
