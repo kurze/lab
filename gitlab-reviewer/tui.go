@@ -722,10 +722,7 @@ func (m model) buildDetailLines(item prItem) []string {
 			if len(sha) > 8 {
 				sha = sha[:8]
 			}
-			msg := cr.Commit.Message
-			if idx := strings.IndexByte(msg, '\n'); idx > 0 {
-				msg = msg[:idx]
-			}
+			msg := firstline(cr.Commit.Message)
 			header := dimStyle.Render(fmt.Sprintf("  ── %s %s ──", sha, msg))
 			lines = append(lines, header)
 			if cr.Result == nil || len(cr.Result.Findings) == 0 {

@@ -59,6 +59,13 @@ func DetectForge(repoPath string) string {
 	return "gitlab"
 }
 
+func firstline(s string) string {
+	if idx := strings.IndexByte(s, '\n'); idx > 0 {
+		return s[:idx]
+	}
+	return s
+}
+
 func NewForge(cfg Config) (Forge, error) {
 	forgeType := cfg.ForgeType
 	if forgeType == "" {

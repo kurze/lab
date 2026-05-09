@@ -43,10 +43,7 @@ func formatCommitResultsBody(b *strings.Builder, commitResults []CommitReviewRes
 		if len(sha) > 8 {
 			sha = sha[:8]
 		}
-		msg := cr.Commit.Message
-		if idx := strings.IndexByte(msg, '\n'); idx > 0 {
-			msg = msg[:idx]
-		}
+		msg := firstline(cr.Commit.Message)
 		fmt.Fprintf(b, "\n### Commit `%s` — %s\n", sha, msg)
 
 		if cr.Result == nil || len(cr.Result.Findings) == 0 {
