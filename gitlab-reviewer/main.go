@@ -19,6 +19,7 @@ func main() {
 	configPath := flag.String("config", "", "path to config file")
 	repoPath := flag.String("repo", "", "path to local repo clone")
 	batch := flag.Bool("batch", false, "batch mode: review all unreviewed MRs without TUI")
+	mode := flag.String("mode", "", "review mode: full or commits")
 	flag.Parse()
 
 	cfg := loadConfig(*configPath)
@@ -29,6 +30,9 @@ func main() {
 		cfg.RepoPath = *repoPath
 	}
 	cfg.DryRun = !*post
+	if *mode != "" {
+		cfg.ReviewMode = *mode
+	}
 
 	if err := cfg.Validate(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -118,26 +122,39 @@ func run(ctx context.Context, cfg Config, state *State, singleMR int64) error {
 
 		log.Printf("reviewing #%d: %s", pr.ID, pr.Title)
 
-		diff, err := forge.GetDiff(ctx, pr.ID)
-		if err != nil {
-			log.Printf("skip #%d: get diff: %v", pr.ID, err)
-			continue
-		}
-
 		worktreeDir, cleanup, err := CreateWorktree(ctx, cfg.RepoPath, pr.ID, forge.Name())
 		if err != nil {
 			log.Printf("skip #%d: worktree: %v", pr.ID, err)
 			continue
 		}
 
-		result, err := reviewer.Review(ctx, worktreeDir, diff)
-		cleanup()
-		if err != nil {
-			log.Printf("skip #%d: review: %v", pr.ID, err)
-			continue
-		}
+		var comment string
+		var result *ReviewResult
 
-		comment := FormatComment(result, pr.Title)
+		if cfg.ReviewMode == "commits" {
+			commitResults, err := reviewByCommits(ctx, forge, reviewer, worktreeDir, pr)
+			cleanup()
+			if err != nil {
+				log.Printf("skip #%d: review: %v", pr.ID, err)
+				continue
+			}
+			result = mergeCommitResults(commitResults)
+			comment = FormatCommitReviewComment(commitResults, pr.Title, result.Model)
+		} else {
+			diff, err := forge.GetDiff(ctx, pr.ID)
+			if err != nil {
+				cleanup()
+				log.Printf("skip #%d: get diff: %v", pr.ID, err)
+				continue
+			}
+			result, err = reviewer.Review(ctx, worktreeDir, diff)
+			cleanup()
+			if err != nil {
+				log.Printf("skip #%d: review: %v", pr.ID, err)
+				continue
+			}
+			comment = FormatComment(result, pr.Title)
+		}
 
 		if cfg.DryRun {
 			fmt.Printf("--- #%d: %s ---\n%s\n\n", pr.ID, pr.Title, comment)

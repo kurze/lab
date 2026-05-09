@@ -12,3 +12,8 @@ type ReviewResult struct {
 	Findings []Finding `json:"findings"`
 	Model    string    `json:"-"`
 }
+
+type CommitReviewResult struct {
+	Commit Commit
+	Result *ReviewResult
+}

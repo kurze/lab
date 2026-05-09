@@ -68,6 +68,23 @@ func (g *GitHubClient) Get(ctx context.Context, id int64) (PullRequest, error) {
 	}, nil
 }
 
+func (g *GitHubClient) ListCommits(ctx context.Context, id int64) ([]Commit, error) {
+	commits, _, err := g.client.PullRequests.ListCommits(ctx, g.owner, g.repo, int(id), &github.ListOptions{PerPage: 100})
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]Commit, len(commits))
+	for i, c := range commits {
+		result[i] = Commit{
+			SHA:     c.GetSHA(),
+			Message: c.GetCommit().GetMessage(),
+			Author:  c.GetCommit().GetAuthor().GetName(),
+		}
+	}
+	return result, nil
+}
+
 func (g *GitHubClient) GetDiff(ctx context.Context, id int64) (string, error) {
 	diff, _, err := g.client.PullRequests.GetRaw(ctx, g.owner, g.repo, int(id), github.RawOptions{Type: github.Diff})
 	if err != nil {

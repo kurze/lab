@@ -25,6 +25,7 @@ type Config struct {
 	ReviewCommand string    `toml:"review_command"`
 	ReviewAgent   string    `toml:"review_agent"`
 	RepoPath      string    `toml:"repo_path"`
+	ReviewMode    string    `toml:"review_mode"`
 	LLM           LLMConfig `toml:"llm"`
 	DryRun        bool      `toml:"-"`
 }
@@ -71,6 +72,9 @@ func loadConfig(path string) Config {
 	}
 	if v := os.Getenv("REVIEW_LLM_MODEL"); v != "" {
 		cfg.LLM.Model = v
+	}
+	if v := os.Getenv("REVIEW_MODE"); v != "" {
+		cfg.ReviewMode = v
 	}
 
 	return cfg

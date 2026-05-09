@@ -13,11 +13,18 @@ type PullRequest struct {
 	Author string
 }
 
+type Commit struct {
+	SHA     string
+	Message string
+	Author  string
+}
+
 type Forge interface {
 	Name() string
 	ListAll(ctx context.Context) ([]PullRequest, error)
 	Get(ctx context.Context, id int64) (PullRequest, error)
 	GetDiff(ctx context.Context, id int64) (string, error)
+	ListCommits(ctx context.Context, id int64) ([]Commit, error)
 	PostComment(ctx context.Context, id int64, body string) error
 }
 

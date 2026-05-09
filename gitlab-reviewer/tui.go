@@ -38,12 +38,13 @@ const (
 )
 
 type prItem struct {
-	pr       PullRequest
-	reviewed bool
-	status   prStatus
-	result   *ReviewResult
-	err      error
-	selected bool
+	pr            PullRequest
+	reviewed      bool
+	status        prStatus
+	result        *ReviewResult
+	commitResults []CommitReviewResult
+	err           error
+	selected      bool
 }
 
 type model struct {
@@ -61,9 +62,10 @@ type model struct {
 }
 
 type reviewDoneMsg struct {
-	id     int64
-	result *ReviewResult
-	err    error
+	id            int64
+	result        *ReviewResult
+	commitResults []CommitReviewResult
+	err           error
 }
 
 type postDoneMsg struct {
@@ -187,6 +189,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				} else {
 					m.items[i].status = statusDone
 					m.items[i].result = msg.result
+					m.items[i].commitResults = msg.commitResults
 					m.state.MarkReviewed(m.cfg.Project, msg.id)
 					m.items[i].reviewed = true
 					m.state.Save()
@@ -292,10 +295,6 @@ func (m model) reviewAll() tea.Cmd {
 func (m model) reviewOne(pr PullRequest) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
-		diff, err := m.forge.GetDiff(ctx, pr.ID)
-		if err != nil {
-			return reviewDoneMsg{id: pr.ID, err: fmt.Errorf("get diff: %w", err)}
-		}
 
 		worktreeDir, cleanup, err := CreateWorktree(ctx, m.cfg.RepoPath, pr.ID, m.forge.Name())
 		if err != nil {
@@ -303,6 +302,18 @@ func (m model) reviewOne(pr PullRequest) tea.Cmd {
 		}
 		defer cleanup()
 
+		if m.cfg.ReviewMode == "commits" {
+			commitResults, err := reviewByCommits(ctx, m.forge, m.reviewer, worktreeDir, pr)
+			if err != nil {
+				return reviewDoneMsg{id: pr.ID, err: err}
+			}
+			return reviewDoneMsg{id: pr.ID, result: mergeCommitResults(commitResults), commitResults: commitResults}
+		}
+
+		diff, err := m.forge.GetDiff(ctx, pr.ID)
+		if err != nil {
+			return reviewDoneMsg{id: pr.ID, err: fmt.Errorf("get diff: %w", err)}
+		}
 		result, err := m.reviewer.Review(ctx, worktreeDir, diff)
 		return reviewDoneMsg{id: pr.ID, result: result, err: err}
 	}
@@ -315,11 +326,11 @@ func (m model) postSelected() tea.Cmd {
 			continue
 		}
 		m.items[i].selected = false
-		cmds = append(cmds, m.postOne(m.items[i].pr, m.items[i].result))
+		cmds = append(cmds, m.postOne(m.items[i].pr, m.items[i].result, m.items[i].commitResults))
 	}
 	if len(cmds) == 0 {
 		if idx, ok := m.cursorIndex(); ok && m.items[idx].status == statusDone && m.items[idx].result != nil {
-			cmds = append(cmds, m.postOne(m.items[idx].pr, m.items[idx].result))
+			cmds = append(cmds, m.postOne(m.items[idx].pr, m.items[idx].result, m.items[idx].commitResults))
 		}
 	}
 	return tea.Batch(cmds...)
@@ -331,15 +342,20 @@ func (m model) postAll() tea.Cmd {
 		if m.items[i].status != statusDone || m.items[i].result == nil || m.items[i].reviewed {
 			continue
 		}
-		cmds = append(cmds, m.postOne(m.items[i].pr, m.items[i].result))
+		cmds = append(cmds, m.postOne(m.items[i].pr, m.items[i].result, m.items[i].commitResults))
 	}
 	return tea.Batch(cmds...)
 }
 
-func (m model) postOne(pr PullRequest, result *ReviewResult) tea.Cmd {
+func (m model) postOne(pr PullRequest, result *ReviewResult, commitResults []CommitReviewResult) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
-		comment := FormatComment(result, pr.Title)
+		var comment string
+		if len(commitResults) > 0 {
+			comment = FormatCommitReviewComment(commitResults, pr.Title, result.Model)
+		} else {
+			comment = FormatComment(result, pr.Title)
+		}
 		if err := m.forge.PostComment(ctx, pr.ID, comment); err != nil {
 			return postDoneMsg{id: pr.ID, err: err}
 		}

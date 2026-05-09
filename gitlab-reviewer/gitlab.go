@@ -70,6 +70,25 @@ func (g *GitLabClient) Get(_ context.Context, id int64) (PullRequest, error) {
 	}, nil
 }
 
+func (g *GitLabClient) ListCommits(_ context.Context, id int64) ([]Commit, error) {
+	commits, _, err := g.client.MergeRequests.GetMergeRequestCommits(g.project, id, &gitlab.GetMergeRequestCommitsOptions{
+		ListOptions: gitlab.ListOptions{PerPage: 100},
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]Commit, len(commits))
+	for i, c := range commits {
+		result[i] = Commit{
+			SHA:     c.ID,
+			Message: c.Title,
+			Author:  c.AuthorName,
+		}
+	}
+	return result, nil
+}
+
 func (g *GitLabClient) GetDiff(_ context.Context, id int64) (string, error) {
 	unidiff := true
 	diffs, _, err := g.client.MergeRequests.ListMergeRequestDiffs(g.project, id, &gitlab.ListMergeRequestDiffsOptions{
