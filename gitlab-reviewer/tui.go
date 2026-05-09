@@ -160,6 +160,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.pickingMode = false
 				m.items[m.pickTarget].reviewMode = modeLabels[m.modeChoice]
 				m.items[m.pickTarget].status = statusReviewing
+				m.items[m.pickTarget].progress = fmt.Sprintf("mode: %s — fetching...", modeLabels[m.modeChoice])
 				return m, m.reviewOne(m.items[m.pickTarget].pr, modeLabels[m.modeChoice])
 			case "esc", "q":
 				m.pickingMode = false
@@ -235,7 +236,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case reviewProgressMsg:
 		for i := range m.items {
 			if m.items[i].pr.ID == msg.id {
-				m.items[i].progress = fmt.Sprintf("commit %d/%d: %s %s", msg.current, msg.total, msg.sha, msg.message)
+				if msg.total > 0 {
+					m.items[i].progress = fmt.Sprintf("commit %d/%d: %s %s", msg.current, msg.total, msg.sha, msg.message)
+				} else {
+					m.items[i].progress = msg.message
+				}
 				break
 			}
 		}
@@ -354,6 +359,7 @@ func (m model) reviewSelected() tea.Cmd {
 		m.items[i].status = statusReviewing
 		m.items[i].selected = false
 		m.items[i].reviewMode = mode
+		m.items[i].progress = fmt.Sprintf("mode: %s — fetching...", mode)
 		cmds = append(cmds, m.reviewOne(m.items[i].pr, mode))
 	}
 	return tea.Batch(cmds...)
@@ -371,6 +377,7 @@ func (m model) reviewAll() tea.Cmd {
 		}
 		m.items[i].status = statusReviewing
 		m.items[i].reviewMode = mode
+		m.items[i].progress = fmt.Sprintf("mode: %s — fetching...", mode)
 		cmds = append(cmds, m.reviewOne(m.items[i].pr, mode))
 	}
 	return tea.Batch(cmds...)
@@ -408,6 +415,9 @@ func (m model) reviewOne(pr PullRequest, mode string) tea.Cmd {
 				digest = digestFindingsPlain(commitResults)
 			}
 
+			if *m.programRef != nil {
+				(*m.programRef).Send(reviewProgressMsg{id: pr.ID, message: "branch repass..."})
+			}
 			diff, err := m.forge.GetDiff(ctx, pr.ID)
 			if err != nil {
 				return reviewDoneMsg{id: pr.ID, err: fmt.Errorf("get diff: %w", err)}
@@ -432,6 +442,9 @@ func (m model) reviewOne(pr PullRequest, mode string) tea.Cmd {
 			diff, err := m.forge.GetDiff(ctx, pr.ID)
 			if err != nil {
 				return reviewDoneMsg{id: pr.ID, err: fmt.Errorf("get diff: %w", err)}
+			}
+			if *m.programRef != nil {
+				(*m.programRef).Send(reviewProgressMsg{id: pr.ID, message: "reviewing full diff..."})
 			}
 			result, err := m.reviewer.ReviewFull(ctx, worktreeDir, diff)
 			return reviewDoneMsg{id: pr.ID, result: result, err: err}
