@@ -49,20 +49,26 @@ type prItem struct {
 	branchResult  *ReviewResult
 	err           error
 	selected      bool
+	reviewMode    string
 }
 
+var modeLabels = []string{"full", "commits", "both"}
+
 type model struct {
-	items    []prItem
-	cursor   int
-	filter   filter
-	width    int
-	height   int
-	forge    Forge
-	reviewer Reviewer
-	cfg      Config
-	state    *State
-	quitting bool
-	message  string
+	items       []prItem
+	cursor      int
+	filter      filter
+	width       int
+	height      int
+	forge       Forge
+	reviewer    Reviewer
+	cfg         Config
+	state       *State
+	quitting    bool
+	message     string
+	pickingMode bool
+	modeChoice  int
+	pickTarget  int
 }
 
 type reviewDoneMsg struct {
@@ -128,6 +134,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.quitting {
 			return m, nil
 		}
+		if m.pickingMode {
+			switch msg.String() {
+			case "j", "down":
+				m.modeChoice = (m.modeChoice + 1) % len(modeLabels)
+			case "k", "up":
+				m.modeChoice = (m.modeChoice - 1 + len(modeLabels)) % len(modeLabels)
+			case "enter":
+				m.pickingMode = false
+				m.items[m.pickTarget].reviewMode = modeLabels[m.modeChoice]
+				m.items[m.pickTarget].status = statusReviewing
+				return m, m.reviewOne(m.items[m.pickTarget].pr, modeLabels[m.modeChoice])
+			case "esc", "q":
+				m.pickingMode = false
+			}
+			return m, nil
+		}
 		switch msg.String() {
 		case "q", "ctrl+c":
 			m.quitting = true
@@ -165,7 +187,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.filter = (m.filter + 1) % 3
 			m.cursor = 0
 		case "r":
-			return m, m.reviewSelected()
+			return m, m.openModePicker()
 		case "R":
 			return m, m.reviewAll()
 		case "p":
@@ -270,38 +292,59 @@ func (m *model) cursorIndex() (int, bool) {
 	return vis[m.cursor], true
 }
 
+func (m *model) openModePicker() tea.Cmd {
+	idx, ok := m.cursorIndex()
+	if !ok || m.items[idx].status == statusReviewing {
+		return nil
+	}
+	m.pickingMode = true
+	m.pickTarget = idx
+	m.modeChoice = 0
+	for i, label := range modeLabels {
+		if label == m.cfg.ReviewMode {
+			m.modeChoice = i
+			break
+		}
+	}
+	return nil
+}
+
 func (m model) reviewSelected() tea.Cmd {
 	var cmds []tea.Cmd
+	mode := m.cfg.ReviewMode
+	if mode == "" {
+		mode = "full"
+	}
 	for i := range m.items {
 		if !m.items[i].selected || m.items[i].status == statusReviewing {
 			continue
 		}
 		m.items[i].status = statusReviewing
 		m.items[i].selected = false
-		cmds = append(cmds, m.reviewOne(m.items[i].pr))
-	}
-	if len(cmds) == 0 {
-		if idx, ok := m.cursorIndex(); ok && m.items[idx].status != statusReviewing {
-			m.items[idx].status = statusReviewing
-			cmds = append(cmds, m.reviewOne(m.items[idx].pr))
-		}
+		m.items[i].reviewMode = mode
+		cmds = append(cmds, m.reviewOne(m.items[i].pr, mode))
 	}
 	return tea.Batch(cmds...)
 }
 
 func (m model) reviewAll() tea.Cmd {
 	var cmds []tea.Cmd
+	mode := m.cfg.ReviewMode
+	if mode == "" {
+		mode = "full"
+	}
 	for i := range m.items {
 		if m.items[i].reviewed || m.items[i].status == statusReviewing || m.items[i].status == statusDone {
 			continue
 		}
 		m.items[i].status = statusReviewing
-		cmds = append(cmds, m.reviewOne(m.items[i].pr))
+		m.items[i].reviewMode = mode
+		cmds = append(cmds, m.reviewOne(m.items[i].pr, mode))
 	}
 	return tea.Batch(cmds...)
 }
 
-func (m model) reviewOne(pr PullRequest) tea.Cmd {
+func (m model) reviewOne(pr PullRequest, mode string) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
 
@@ -311,7 +354,7 @@ func (m model) reviewOne(pr PullRequest) tea.Cmd {
 		}
 		defer cleanup()
 
-		switch m.cfg.ReviewMode {
+		switch mode {
 		case "both":
 			commitResults, err := reviewByCommits(ctx, m.forge, m.reviewer, worktreeDir, pr)
 			if err != nil {
@@ -540,7 +583,21 @@ func (m model) View() string {
 	b.WriteByte('\n')
 
 	detailLines := 0
-	if idx, ok := m.cursorIndex(); ok {
+	if m.pickingMode {
+		b.WriteString(headerStyle.Render("  Review mode:"))
+		b.WriteByte('\n')
+		detailLines++
+		modeDescs := []string{"Full diff review", "Commit-by-commit", "Both (commits + branch repass)"}
+		for i, desc := range modeDescs {
+			prefix := "  "
+			if i == m.modeChoice {
+				prefix = cursorStyle.Render("▸ ")
+			}
+			b.WriteString(fmt.Sprintf("  %s%s", prefix, desc))
+			b.WriteByte('\n')
+			detailLines++
+		}
+	} else if idx, ok := m.cursorIndex(); ok {
 		item := m.items[idx]
 		switch item.status {
 		case statusDone:
