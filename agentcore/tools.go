@@ -92,7 +92,53 @@ func StandardToolDefs() []any {
 	}
 }
 
-func StandardToolDispatch(root string, tc LLMTool, contextPulled *[]string) ToolResult {
+func LoadAgentsMD(root, dir string, seen map[string]bool) string {
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return ""
+	}
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return ""
+	}
+
+	var dirs []string
+	for d := absDir; ; d = filepath.Dir(d) {
+		dirs = append(dirs, d)
+		if d == absRoot || !strings.HasPrefix(d, absRoot) {
+			break
+		}
+		if d == filepath.Dir(d) {
+			break
+		}
+	}
+
+	var parts []string
+	for i := len(dirs) - 1; i >= 0; i-- {
+		d := dirs[i]
+		if seen[d] {
+			continue
+		}
+		seen[d] = true
+		p := filepath.Join(d, "AGENTS.md")
+		data, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		content := strings.TrimSpace(string(data))
+		if content == "" {
+			continue
+		}
+		rel, _ := filepath.Rel(absRoot, d)
+		if rel == "" || rel == "." {
+			rel = "."
+		}
+		parts = append(parts, fmt.Sprintf("--- AGENTS.md (%s) ---\n%s\n--- end AGENTS.md ---", rel, content))
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+func StandardToolDispatch(root string, tc LLMTool, contextPulled *[]string, seen map[string]bool) ToolResult {
 	var args map[string]any
 	if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
 		return ToolResult{Content: fmt.Sprintf("invalid arguments: %s", err), IsError: true}
@@ -109,6 +155,12 @@ func StandardToolDispatch(root string, tc LLMTool, contextPulled *[]string) Tool
 		result := ExecReadFile(root, path, int(start), int(end))
 		if !result.IsError {
 			*contextPulled = append(*contextPulled, path)
+			if seen != nil {
+				dir := filepath.Dir(filepath.Join(root, path))
+				if extra := LoadAgentsMD(root, dir, seen); extra != "" {
+					result.Content += "\n\n" + extra
+				}
+			}
 		}
 		return result.Truncated()
 
@@ -136,6 +188,12 @@ func StandardToolDispatch(root string, tc LLMTool, contextPulled *[]string) Tool
 		result := ExecListDir(root, path)
 		if !result.IsError {
 			*contextPulled = append(*contextPulled, fmt.Sprintf("ls:%s", path))
+			if seen != nil {
+				dir := filepath.Join(root, path)
+				if extra := LoadAgentsMD(root, dir, seen); extra != "" {
+					result.Content += "\n\n" + extra
+				}
+			}
 		}
 		return result.Truncated()
 

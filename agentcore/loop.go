@@ -23,7 +23,7 @@ type LoopConfig struct {
 	Root           string
 	Messages       []ChatMessage
 	Tools          []any
-	ToolDispatcher func(root string, tc LLMTool, contextPulled *[]string) ToolResult
+	ToolDispatcher func(root string, tc LLMTool, contextPulled *[]string, seen map[string]bool) ToolResult
 	Temperature    float64
 	MaxIter        int
 	MaxTokens      int
@@ -96,6 +96,7 @@ func RunLoop(ctx context.Context, llm *LLMClient, cfg LoopConfig) (lr *LoopResul
 	}
 
 	var contextPulled []string
+	agentsMDSeen := make(map[string]bool)
 	var lastToolSig string
 	stuckCount := 0
 	lastTokens := 0
@@ -181,7 +182,7 @@ func RunLoop(ctx context.Context, llm *LLMClient, cfg LoopConfig) (lr *LoopResul
 		messages = append(messages, ChatMessage{Role: "assistant", Content: msg.Content, ToolCalls: msg.ToolCalls})
 
 		for _, tc := range msg.ToolCalls {
-			result := cfg.ToolDispatcher(cfg.Root, tc, &contextPulled)
+			result := cfg.ToolDispatcher(cfg.Root, tc, &contextPulled, agentsMDSeen)
 			tracer.Log(TraceEntry{Iteration: iter, Role: "tool", Content: result.Content, ToolResults: tc.ID})
 			messages = append(messages, ChatMessage{
 				Role:       "tool",
