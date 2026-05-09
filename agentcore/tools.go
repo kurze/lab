@@ -78,6 +78,20 @@ func StandardToolDefs() []any {
 		map[string]any{
 			"type": "function",
 			"function": map[string]any{
+				"name":        "glob",
+				"description": "Find files by name pattern. Uses doublestar glob syntax: ** matches any number of directories, * matches within a single directory.",
+				"parameters": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"pattern": map[string]any{"type": "string", "description": "Glob pattern (e.g. **/*.go, src/**/test_*.py, **/config*.toml)"},
+					},
+					"required": []string{"pattern"},
+				},
+			},
+		},
+		map[string]any{
+			"type": "function",
+			"function": map[string]any{
 				"name":        "git_log",
 				"description": "Show recent git commit history.",
 				"parameters": map[string]any{
@@ -194,6 +208,17 @@ func StandardToolDispatch(root string, tc LLMTool, contextPulled *[]string, seen
 					result.Content += "\n\n" + extra
 				}
 			}
+		}
+		return result.Truncated()
+
+	case "glob":
+		pattern, _ := args["pattern"].(string)
+		if pattern == "" {
+			return ToolResult{Content: "missing required argument: pattern", IsError: true}
+		}
+		result := ExecGlob(root, pattern)
+		if !result.IsError {
+			*contextPulled = append(*contextPulled, fmt.Sprintf("glob:%s", pattern))
 		}
 		return result.Truncated()
 
@@ -337,6 +362,77 @@ func ExecListDir(root, path string) ToolResult {
 		lines = append(lines, e.Name()+suffix)
 	}
 	return ToolResult{Content: strings.Join(lines, "\n")}
+}
+
+func ExecGlob(root, pattern string) ToolResult {
+	const maxResults = 500
+
+	var matches []string
+	err := filepath.Walk(root, func(p string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		if info.IsDir() {
+			base := info.Name()
+			if base == ".git" || base == "node_modules" || base == "__pycache__" || base == ".venv" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		rel, _ := filepath.Rel(root, p)
+		if doublestarMatch(pattern, rel) {
+			matches = append(matches, rel)
+			if len(matches) >= maxResults {
+				return filepath.SkipAll
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return ToolResult{Content: err.Error(), IsError: true}
+	}
+
+	if len(matches) == 0 {
+		return ToolResult{Content: "no files found"}
+	}
+	result := strings.Join(matches, "\n")
+	if len(matches) >= maxResults {
+		result += fmt.Sprintf("\n... truncated at %d files", maxResults)
+	}
+	return ToolResult{Content: result}
+}
+
+func doublestarMatch(pattern, path string) bool {
+	patParts := strings.Split(pattern, "/")
+	pathParts := strings.Split(path, "/")
+	return matchParts(patParts, pathParts)
+}
+
+func matchParts(pat, path []string) bool {
+	for len(pat) > 0 && len(path) > 0 {
+		if pat[0] == "**" {
+			pat = pat[1:]
+			if len(pat) == 0 {
+				return true
+			}
+			for i := 0; i <= len(path); i++ {
+				if matchParts(pat, path[i:]) {
+					return true
+				}
+			}
+			return false
+		}
+		matched, _ := filepath.Match(pat[0], path[0])
+		if !matched {
+			return false
+		}
+		pat = pat[1:]
+		path = path[1:]
+	}
+	if len(pat) == 1 && pat[0] == "**" {
+		return true
+	}
+	return len(pat) == 0 && len(path) == 0
 }
 
 func ExecGitLog(root string, count int, ref string) ToolResult {

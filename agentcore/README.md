@@ -41,11 +41,12 @@ lr, err := agentcore.RunLoop(ctx, llm, agentcore.LoopConfig{
 
 ### Standard tools
 
-The agent gets four tools to explore the workspace, all path-sandboxed to the root:
+The agent gets five tools to explore the workspace, all path-sandboxed to the root:
 
 - **read_file** — read a file (optionally a line range), max 1MB
-- **grep** — regex search across files, max 200 matches
-- **list_dir** — list directory entries
+- **grep** — regex search for text inside files, max 200 matches
+- **glob** — find files by name pattern (`**/*.go`, `src/**/test_*.py`), supports `**` for recursive matching
+- **list_dir** — list directory entries (flat, single directory)
 - **git_log** — recent commit history
 
 ### AGENTS.md
