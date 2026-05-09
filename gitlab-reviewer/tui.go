@@ -43,6 +43,7 @@ const (
 type prItem struct {
 	pr            PullRequest
 	reviewed      bool
+	posted        bool
 	status        prStatus
 	result        *ReviewResult
 	commitResults []CommitReviewResult
@@ -272,6 +273,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if msg.err != nil {
 					m.message = fmt.Sprintf("post #%d failed: %v", msg.id, msg.err)
 				} else {
+					m.items[i].posted = true
 					m.message = fmt.Sprintf("posted review for #%d", msg.id)
 				}
 				break
@@ -455,16 +457,19 @@ func (m model) reviewOne(pr PullRequest, mode string) tea.Cmd {
 func (m model) postSelected() tea.Cmd {
 	var cmds []tea.Cmd
 	for i := range m.items {
-		if !m.items[i].selected || m.items[i].status != statusDone || m.items[i].result == nil {
+		if !m.items[i].selected || m.items[i].posted || m.items[i].status != statusDone || m.items[i].result == nil {
 			continue
 		}
 		m.items[i].selected = false
 		cmds = append(cmds, m.postOne(m.items[i]))
 	}
 	if len(cmds) == 0 {
-		if idx, ok := m.cursorIndex(); ok && m.items[idx].status == statusDone && m.items[idx].result != nil {
+		if idx, ok := m.cursorIndex(); ok && m.items[idx].status == statusDone && m.items[idx].result != nil && !m.items[idx].posted {
 			cmds = append(cmds, m.postOne(m.items[idx]))
 		}
+	}
+	if len(cmds) == 0 {
+		m.message = "nothing to post"
 	}
 	return tea.Batch(cmds...)
 }
@@ -472,10 +477,13 @@ func (m model) postSelected() tea.Cmd {
 func (m model) postAll() tea.Cmd {
 	var cmds []tea.Cmd
 	for i := range m.items {
-		if m.items[i].status != statusDone || m.items[i].result == nil || m.items[i].reviewed {
+		if m.items[i].status != statusDone || m.items[i].result == nil || m.items[i].posted {
 			continue
 		}
 		cmds = append(cmds, m.postOne(m.items[i]))
+	}
+	if len(cmds) == 0 {
+		m.message = "nothing to post"
 	}
 	return tea.Batch(cmds...)
 }
@@ -609,7 +617,9 @@ func (m model) View() string {
 		}
 
 		reviewedMark := " "
-		if item.reviewed {
+		if item.posted {
+			reviewedMark = statusOK.Render("P")
+		} else if item.reviewed {
 			reviewedMark = dimStyle.Render("R")
 		}
 
