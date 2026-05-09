@@ -599,9 +599,23 @@ func (m model) View() string {
 			b.WriteByte('\n')
 			detailLines++
 		default:
-			b.WriteString(dimStyle.Render("  select and press r to review"))
+			b.WriteString(fmt.Sprintf("  %s", item.pr.Title))
 			b.WriteByte('\n')
 			detailLines++
+			if detailLines < detailHeight-1 {
+				meta := fmt.Sprintf("  author: %s", item.pr.Author)
+				if !item.pr.UpdatedAt.IsZero() {
+					meta += fmt.Sprintf("  updated: %s ago", relativeTime(item.pr.UpdatedAt))
+				}
+				b.WriteString(dimStyle.Render(meta))
+				b.WriteByte('\n')
+				detailLines++
+			}
+			if detailLines < detailHeight-1 {
+				b.WriteString(dimStyle.Render("  press r to review"))
+				b.WriteByte('\n')
+				detailLines++
+			}
 		}
 	}
 	for detailLines < detailHeight-1 {
