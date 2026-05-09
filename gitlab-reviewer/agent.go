@@ -71,13 +71,15 @@ func (r *LLMReviewer) review(ctx context.Context, workDir string, diff string, f
 	}
 	defer lr.Tracer.Close()
 
-	if lr.Truncated {
+	reviewText := lr.FinalMessage.Content
+	if lr.Truncated || reviewText == "" {
 		return &ReviewResult{Findings: []Finding{}, Model: r.Model}, nil
 	}
 
-	result, err := parseLLMOutput(lr)
+	result, err := r.extractFindings(ctx, reviewText)
 	if err != nil {
-		return nil, err
+		log.Printf("warning: extraction failed, returning empty findings: %v", err)
+		return &ReviewResult{Findings: []Finding{}, Model: r.Model}, nil
 	}
 	result.Model = r.Model
 	return result, nil
@@ -114,16 +116,46 @@ func (r *LLMReviewer) ReviewWithContext(ctx context.Context, workDir string, dif
 	}
 	defer lr.Tracer.Close()
 
-	if lr.Truncated {
+	reviewText := lr.FinalMessage.Content
+	if lr.Truncated || reviewText == "" {
 		return &ReviewResult{Findings: []Finding{}, Model: r.Model}, nil
 	}
 
-	result, err := parseLLMOutput(lr)
+	result, err := r.extractFindings(ctx, reviewText)
 	if err != nil {
-		return nil, err
+		log.Printf("warning: extraction failed, returning empty findings: %v", err)
+		return &ReviewResult{Findings: []Finding{}, Model: r.Model}, nil
 	}
 	result.Model = r.Model
 	return result, nil
+}
+
+func (r *LLMReviewer) extractFindings(ctx context.Context, reviewText string) (*ReviewResult, error) {
+	resp, err := r.LLM.Chat(ctx, agentcore.ChatRequest{
+		Model: r.Model,
+		Messages: []agentcore.ChatMessage{
+			{Role: "system", Content: `Extract structured findings from the code review below. Output ONLY a JSON object:
+{"findings": [{"category": "string", "severity": "info|minor|major|critical", "location": "file:line", "description": "one sentence", "evidence": "short quote or empty"}]}
+If the review found no issues, return {"findings": []}.`},
+			{Role: "user", Content: reviewText},
+		},
+		Temperature: 0.1,
+		MaxTokens:   4000,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("extraction LLM call: %w", err)
+	}
+
+	if len(resp.Choices) == 0 {
+		return &ReviewResult{}, nil
+	}
+
+	content := agentcore.ExtractJSON(resp.Choices[0].Message.Content)
+	var result ReviewResult
+	if err := json.Unmarshal([]byte(content), &result); err != nil {
+		return nil, fmt.Errorf("parse extraction output: %w", err)
+	}
+	return &result, nil
 }
 
 func buildMRRepassPrompt(root string, priorContext string) string {
@@ -141,9 +173,9 @@ Workspace root: %s
 Tools (paths relative to root):
 - read_file, grep, glob, list_dir, git_log, git_diff, git_blame, git_show, fork
 
-Output MUST be JSON: {"findings": [{"category": "...", "severity": "info|minor|major|critical", "location": "file:line", "description": "...", "evidence": "..."}]}
+Write your review as plain text. For each finding state: the file and line, severity (info/minor/major/critical), what you found, and a short evidence quote. If no new issues, just say "No cross-cutting issues found."
 
-Rules: never repeat prior findings. Descriptive, not prescriptive. Descriptions under 2 sentences. If no new cross-cutting issues found, return {"findings": []}.`, priorContext, root)
+Rules: never repeat prior findings. Descriptive, not prescriptive. Keep each finding to 1-2 sentences.`, priorContext, root)
 }
 
 func buildCommitReviewPrompt(root string) string {
@@ -156,16 +188,15 @@ Tools (paths relative to root):
 - grep: regex search
 - list_dir: list directory
 
-Process: read the diff, optionally read 1-2 changed files for context, then output findings.
-If the commit is trivial (rename, formatting, comments only), return {"findings": []}.
+Process: read the diff, optionally read 1-2 changed files for context, then write your review.
 
-Output MUST be JSON: {"findings": [{"category": "...", "severity": "info|minor|major|critical", "location": "file:line", "description": "...", "evidence": "..."}]}
+Write your review as plain text. For each finding state: the file and line, severity (info/minor/major/critical), what you found. If the commit is trivial or has no issues, just say "No issues found."
 
-Rules: focus on changes only, not pre-existing issues. Be descriptive, not prescriptive. Keep descriptions under 2 sentences. Keep evidence to a single short quote or omit.`, root)
+Rules: focus on changes only, not pre-existing issues. Be descriptive, not prescriptive. Keep each finding to 1-2 sentences.`, root)
 }
 
 func buildMRReviewPrompt(root string) string {
-	return fmt.Sprintf(`You are a code review agent. Review the merge request diff. Be brief throughout — short tool calls, concise findings.
+	return fmt.Sprintf(`You are a code review agent. Review the merge request diff. Be brief — short tool calls, concise findings.
 
 Workspace root: %s
 
@@ -178,56 +209,8 @@ Process:
 2. Fork into parallel reviews: correctness, security, consistency
 3. Combine results into final output
 
-Output MUST be JSON: {"findings": [{"category": "...", "severity": "info|minor|major|critical", "location": "file:line", "description": "...", "evidence": "..."}]}
+Write your review as plain text. For each finding state: the file and line, severity (info/minor/major/critical), what you found, and a short evidence quote.
 
-Rules: focus on changes only. Descriptive, not prescriptive. Descriptions under 2 sentences. Evidence: single short quote or omit.`, root)
+Rules: focus on changes only. Descriptive, not prescriptive. Keep each finding to 1-2 sentences.`, root)
 }
 
-func parseLLMOutput(lr *agentcore.LoopResult) (*ReviewResult, error) {
-	content := agentcore.ExtractJSON(lr.FinalMessage.Content)
-
-	var result ReviewResult
-	if err := json.Unmarshal([]byte(content), &result); err == nil {
-		return &result, nil
-	}
-
-	// Output may be truncated — salvage complete findings
-	result.Findings = salvageFindings(content)
-	if len(result.Findings) > 0 {
-		log.Printf("warning: output was truncated, salvaged %d complete finding(s)", len(result.Findings))
-		return &result, nil
-	}
-
-	log.Printf("warning: could not parse review output, returning empty findings")
-	return &ReviewResult{}, nil
-}
-
-func salvageFindings(content string) []Finding {
-	// Find each complete JSON object in the findings array
-	var findings []Finding
-	depth := 0
-	start := -1
-	for i, c := range content {
-		switch c {
-		case '{':
-			if depth == 0 {
-				start = i
-			}
-			depth++
-		case '}':
-			depth--
-			if depth == 0 && start >= 0 {
-				var f Finding
-				if err := json.Unmarshal([]byte(content[start:i+1]), &f); err == nil && f.Description != "" {
-					findings = append(findings, f)
-				}
-				start = -1
-			}
-		}
-	}
-	// Skip the first match — it's the outer {"findings": ...} wrapper
-	if len(findings) > 1 {
-		return findings[1:]
-	}
-	return nil
-}
