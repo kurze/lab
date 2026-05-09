@@ -54,7 +54,15 @@ Artifact: %s
 Focus area: %s
 Workspace root: %s
 
-You have three tools: read_file, grep, list_dir. All paths are relative to the workspace root.
+Tools available (all paths relative to workspace root):
+- read_file: read file contents (with optional line range)
+- grep: regex search inside files
+- glob: find files by name pattern (e.g. **/*.go)
+- list_dir: list directory entries
+- git_log: recent commit history
+- git_diff: compare two refs or see changes to a specific file
+- git_blame: see who last modified each line and when
+- git_show: inspect a specific commit
 
 Process:
 1. Read the artifact file

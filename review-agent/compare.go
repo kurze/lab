@@ -75,12 +75,20 @@ New version: %s
 Focus area: %s
 Workspace root: %s
 
-You have four tools: read_file, grep, list_dir, git_log. All paths are relative to the workspace root.
+Tools available (all paths relative to workspace root):
+- read_file: read file contents (with optional line range)
+- grep: regex search inside files
+- glob: find files by name pattern (e.g. **/*.go)
+- list_dir: list directory entries
+- git_log: recent commit history
+- git_diff: compare two refs or see changes to a specific file
+- git_blame: see who last modified each line and when
+- git_show: inspect a specific commit
 
 Process:
 1. Read both the old and new versions
 2. Identify what changed: added sections, removed sections, modified claims, changed assumptions
-3. Explore the workspace to understand the impact of changes
+3. Explore the workspace to understand the impact of changes — use git_log and git_diff to see related recent changes
 4. When ready, produce your final output as a JSON object
 
 Your final output MUST be a JSON object with exactly these fields:

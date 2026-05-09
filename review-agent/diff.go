@@ -29,6 +29,7 @@ func runDiffReview(ctx context.Context, llm *agentcore.LLMClient, model ModelDef
 		Temperature:    0.3,
 		MaxIter:        maxIter,
 		MaxTokens:      defaultMaxTokens,
+		MaxForkDepth:   1,
 		AgentName:      agentName,
 		TracerTag:      "diff-" + sanitizeTracerTag(diffRef),
 		Tools:          agentcore.StandardToolDefs(),
@@ -58,13 +59,25 @@ Diff reference: %s
 Focus area: %s
 Workspace root: %s
 
-You have three tools: read_file, grep, list_dir. All paths are relative to the workspace root.
-Use these tools to understand the surrounding code context for the changes in the diff.
+Tools available (all paths relative to workspace root):
+- read_file: read file contents (with optional line range)
+- grep: regex search inside files
+- glob: find files by name pattern (e.g. **/*.go)
+- list_dir: list directory entries
+- git_log: recent commit history
+- git_diff: compare two refs or see changes to a specific file
+- git_blame: see who last modified each line and when
+- git_show: inspect a specific commit
+- fork: split into parallel sub-tasks sharing your current context
 
 Process:
 1. Analyze the diff provided in the user message
-2. Explore the workspace to understand the context around the changed code
-3. When ready, produce your final output as a JSON object
+2. Explore the workspace to understand context: read changed files, grep for related usage, use git_blame/git_diff to understand change history
+3. When you have enough context, use fork to run parallel focused reviews:
+   - One sub-task for correctness and logic errors
+   - One sub-task for security implications
+   Each fork sub-task should produce its own findings JSON.
+4. Combine fork results into your final output
 
 Your final output MUST be a JSON object with exactly these fields:
 {
