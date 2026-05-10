@@ -85,6 +85,7 @@ const (
 	TUIReplan              // user pressed 'r' to replan a PLAN task
 	TUIRework              // user pressed 'r' to rework a LOCAL_REVIEW task
 	TUIPush                // user pressed 'p' to push a LOCAL_REVIEW task
+	TUIResume              // user pressed 'R' to resume a stuck task
 )
 
 type tuiModel struct {
@@ -191,6 +192,15 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.action = TUIPush
 				m.selectedID = m.tasks[m.cursor].ID
 				return m, tea.Quit
+			}
+		case "R":
+			if m.cursor < len(m.tasks) {
+				s := m.tasks[m.cursor].State
+				if s == fsm.AIReview || s == fsm.AIFix || s == fsm.Code {
+					m.action = TUIResume
+					m.selectedID = m.tasks[m.cursor].ID
+					return m, tea.Quit
+				}
 			}
 		case "up", "k":
 			if m.layout == layoutSinglePane && m.singleTab != 0 {
@@ -323,6 +333,10 @@ func (m tuiModel) renderFooter() string {
 			keys = append(keys,
 				struct{ key, label string }{"p", "push"},
 				struct{ key, label string }{"r", "rework"},
+			)
+		case fsm.AIReview, fsm.AIFix:
+			keys = append(keys,
+				struct{ key, label string }{"R", "resume"},
 			)
 		}
 	}

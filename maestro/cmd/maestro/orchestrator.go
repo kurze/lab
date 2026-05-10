@@ -260,6 +260,8 @@ func cmdStatus(configPath string, noJira bool, agentType string) error {
 		return cmdRework(configPath, title, "", noJira)
 	case TUIPush:
 		return cmdPush(configPath, title, noJira)
+	case TUIResume:
+		return cmdResume(configPath, title, noJira)
 	}
 
 	return nil
