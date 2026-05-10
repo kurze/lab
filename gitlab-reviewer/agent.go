@@ -161,21 +161,28 @@ If the review found no issues, return {"findings": []}.`},
 func buildMRRepassPrompt(root string, priorContext string) string {
 	return fmt.Sprintf(`You are a code review agent. Second pass — DO NOT repeat prior findings. Be brief.
 
-Prior findings:
+Prior findings (already reported):
 <prior_findings>
 %s
 </prior_findings>
 
-Focus only on: cross-commit interactions, architectural impact, patterns across commits, branch-scope concerns.
-
 Workspace root: %s
 
 Tools (paths relative to root):
-- read_file, grep, glob, list_dir, git_log, git_diff, git_blame, git_show, fork
+- read_file, grep, glob, list_dir, git_log, git_diff, git_blame, git_show
+- fork: split into parallel sub-tasks (use this!)
 
-Write your review as plain text. For each finding state: the file and line, severity (info/minor/major/critical), what you found, and a short evidence quote. If no new issues, just say "No cross-cutting issues found."
+Process:
+1. EXPLORE: read the full diff. Use grep/read_file to trace how changes across commits interact — shared state, call chains, data flow.
+2. FORK into parallel hunts for cross-cutting concerns only:
+   - **Cross-commit bugs**: changes in one commit that break assumptions made in another, inconsistent error handling across the branch
+   - **Architectural impact**: API surface changes, dependency changes, migration concerns, backwards compatibility
+   - **Branch-wide patterns**: repeated anti-patterns, missing tests for new code paths, inconsistent naming or conventions
+3. Each fork should explore the codebase for evidence. Don't guess — read the code.
 
-Rules: never repeat prior findings. Descriptive, not prescriptive. Keep each finding to 1-2 sentences.`, priorContext, root)
+Output: plain text. For each finding: file:line, severity (info/minor/major/critical), what you found, short evidence quote. If no new issues, say "No cross-cutting issues found."
+
+Rules: NEVER repeat prior findings. Focus on what spans multiple commits or emerges from the full picture. Descriptive, not prescriptive. 1-2 sentences per finding.`, priorContext, root)
 }
 
 func buildCommitReviewPrompt(root string) string {
@@ -196,21 +203,25 @@ Rules: focus on changes only, not pre-existing issues. Be descriptive, not presc
 }
 
 func buildMRReviewPrompt(root string) string {
-	return fmt.Sprintf(`You are a code review agent. Review the merge request diff. Be brief — short tool calls, concise findings.
+	return fmt.Sprintf(`You are a code review agent. Review the merge request diff. Be brief — concise findings.
 
 Workspace root: %s
 
 Tools (paths relative to root):
 - read_file, grep, glob, list_dir, git_log, git_diff, git_blame, git_show
-- fork: split into parallel sub-tasks
+- fork: split into parallel sub-tasks (use this!)
 
 Process:
-1. Read the diff, explore workspace briefly for context
-2. Fork into parallel reviews: correctness, security, consistency
-3. Combine results into final output
+1. EXPLORE: read the diff carefully. Use grep/read_file to understand the surrounding code — call sites, types, invariants. Build context before judging.
+2. FORK into four parallel hunts:
+   - **Bugs**: logic errors, nil derefs, off-by-one, race conditions, missing error handling, broken invariants
+   - **Security**: injection, auth bypass, secrets exposure, unsafe input handling, path traversal
+   - **Performance**: unnecessary allocations, O(n²) loops, missing caching, unbounded growth, blocking calls
+   - **Style & maintainability**: dead code, naming, unclear control flow, missing or misleading abstractions
+3. Each fork should explore the codebase for evidence before reporting. Read changed files fully, check callers and callees.
 
-Write your review as plain text. For each finding state: the file and line, severity (info/minor/major/critical), what you found, and a short evidence quote.
+Output: plain text. For each finding: file:line, severity (info/minor/major/critical), what you found, short evidence quote.
 
-Rules: focus on changes only. Descriptive, not prescriptive. Keep each finding to 1-2 sentences.`, root)
+Rules: focus on changes only, not pre-existing issues. Descriptive, not prescriptive. 1-2 sentences per finding. If a category has no findings, skip it.`, root)
 }
 
