@@ -20,11 +20,11 @@
 # Review mode: "full", "commits", or "both" (default: "full")
 # review_mode = "full"
 
-# Comment style: "summary", "inline", or "both" (default: "summary")
+# Comment style: "summary", "inline", or "both" (default: "both")
 #   summary = single MR comment with all findings
 #   inline  = inline comments on diff lines only
 #   both    = inline comments + summary comment
-# comment_style = "summary"
+# comment_style = "both"
 
 # Minimum severity for inline comments: "info", "minor", "major", "critical" (default: "minor")
 # inline_severity = "minor"
