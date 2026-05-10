@@ -81,6 +81,10 @@ type TUIAction int
 const (
 	TUIQuit      TUIAction = iota
 	TUINewTask             // user pressed 'n' to create a new task
+	TUIApprove             // user pressed 'a' to approve a PLAN task
+	TUIReplan              // user pressed 'r' to replan a PLAN task
+	TUIRework              // user pressed 'r' to rework a LOCAL_REVIEW task
+	TUIPush                // user pressed 'p' to push a LOCAL_REVIEW task
 )
 
 type tuiModel struct {
@@ -92,9 +96,10 @@ type tuiModel struct {
 	layout    layoutMode
 	graph     *planner.Graph // plan for selected task
 	singleTab int           // 0=list, 1=dag, 2=detail (single-pane mode)
-	action    TUIAction
-	inputMode bool   // true when typing a new task title
-	inputBuf  string // title being typed
+	action     TUIAction
+	selectedID string // task ID for approve/replan/push/rework
+	inputMode  bool   // true when typing a new task title
+	inputBuf   string // title being typed
 }
 
 func runTUI(tasks []*task.Task, store *task.Store) (TUIAction, string, error) {
@@ -114,7 +119,11 @@ func runTUI(tasks []*task.Task, store *task.Store) (TUIAction, string, error) {
 		return TUIQuit, "", err
 	}
 	final := result.(tuiModel)
-	return final.action, final.inputBuf, nil
+	out := final.inputBuf
+	if final.selectedID != "" {
+		out = final.selectedID
+	}
+	return final.action, out, nil
 }
 
 func (m tuiModel) Init() tea.Cmd {
@@ -158,6 +167,31 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "n":
 			m.inputMode = true
 			m.inputBuf = ""
+		case "a":
+			if m.cursor < len(m.tasks) && m.tasks[m.cursor].State == fsm.Plan {
+				m.action = TUIApprove
+				m.selectedID = m.tasks[m.cursor].ID
+				return m, tea.Quit
+			}
+		case "r":
+			if m.cursor < len(m.tasks) {
+				switch m.tasks[m.cursor].State {
+				case fsm.Plan:
+					m.action = TUIReplan
+					m.selectedID = m.tasks[m.cursor].ID
+					return m, tea.Quit
+				case fsm.LocalReview:
+					m.action = TUIRework
+					m.selectedID = m.tasks[m.cursor].ID
+					return m, tea.Quit
+				}
+			}
+		case "p":
+			if m.cursor < len(m.tasks) && m.tasks[m.cursor].State == fsm.LocalReview {
+				m.action = TUIPush
+				m.selectedID = m.tasks[m.cursor].ID
+				return m, tea.Quit
+			}
 		case "up", "k":
 			if m.layout == layoutSinglePane && m.singleTab != 0 {
 				break

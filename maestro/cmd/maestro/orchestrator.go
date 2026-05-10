@@ -247,8 +247,19 @@ func cmdStatus(configPath string, noJira bool, agentType string) error {
 		return err
 	}
 
-	if action == TUINewTask && title != "" {
-		return cmdNew(configPath, title, "", noJira, agentType)
+	switch action {
+	case TUINewTask:
+		if title != "" {
+			return cmdNew(configPath, title, "", noJira, agentType)
+		}
+	case TUIApprove:
+		return cmdApprove(configPath, title, noJira)
+	case TUIReplan:
+		return cmdReplan(configPath, title, "", noJira)
+	case TUIRework:
+		return cmdRework(configPath, title, "", noJira)
+	case TUIPush:
+		return cmdPush(configPath, title, noJira)
 	}
 
 	return nil
