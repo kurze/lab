@@ -4,5 +4,6 @@ use (
 	./agentcore
 	./fast-chat/go
 	./gitlab-reviewer
+	./maestro
 	./review-agent
 )
