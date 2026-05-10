@@ -174,11 +174,10 @@ Tools (paths relative to root):
 
 Process:
 1. EXPLORE: read the full diff. Use grep/read_file to trace how changes across commits interact — shared state, call chains, data flow.
-2. FORK into parallel hunts for cross-cutting concerns only:
-   - **Cross-commit bugs**: changes in one commit that break assumptions made in another, inconsistent error handling across the branch
-   - **Architectural impact**: API surface changes, dependency changes, migration concerns, backwards compatibility
-   - **Branch-wide patterns**: repeated anti-patterns, missing tests for new code paths, inconsistent naming or conventions
-3. Each fork should explore the codebase for evidence. Don't guess — read the code.
+2. Call the fork tool with these three tasks:
+   - id:"cross-bugs", prompt:"Hunt for changes in one commit that break assumptions in another, inconsistent error handling across the branch. Trace shared state and call chains."
+   - id:"architecture", prompt:"Hunt for API surface changes, dependency issues, migration concerns, backwards compatibility problems."
+   - id:"patterns", prompt:"Hunt for repeated anti-patterns, missing tests for new code paths, inconsistent naming or conventions across the branch."
 
 Output: plain text. For each finding: file:line, severity (info/minor/major/critical), what you found, short evidence quote. If no new issues, say "No cross-cutting issues found."
 
@@ -213,12 +212,11 @@ Tools (paths relative to root):
 
 Process:
 1. EXPLORE: read the diff carefully. Use grep/read_file to understand the surrounding code — call sites, types, invariants. Build context before judging.
-2. FORK into four parallel hunts:
-   - **Bugs**: logic errors, nil derefs, off-by-one, race conditions, missing error handling, broken invariants
-   - **Security**: injection, auth bypass, secrets exposure, unsafe input handling, path traversal
-   - **Performance**: unnecessary allocations, O(n²) loops, missing caching, unbounded growth, blocking calls
-   - **Style & maintainability**: dead code, naming, unclear control flow, missing or misleading abstractions
-3. Each fork should explore the codebase for evidence before reporting. Read changed files fully, check callers and callees.
+2. Call the fork tool with these four tasks:
+   - id:"bugs", prompt:"Hunt for logic errors, nil derefs, off-by-one, race conditions, missing error handling, broken invariants. Read changed files and their callers for evidence."
+   - id:"security", prompt:"Hunt for injection, auth bypass, secrets exposure, unsafe input handling, path traversal. Trace data flow from inputs to sensitive operations."
+   - id:"perf", prompt:"Hunt for unnecessary allocations, O(n²) loops, missing caching, unbounded growth, blocking calls. Check hot paths."
+   - id:"style", prompt:"Hunt for dead code, naming issues, unclear control flow, missing or misleading abstractions."
 
 Output: plain text. For each finding: file:line, severity (info/minor/major/critical), what you found, short evidence quote.
 
