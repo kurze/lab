@@ -33,6 +33,7 @@ type AgentsConfig struct {
 type ReviewConfig struct {
 	MaxIterations int    `yaml:"max_iterations"`
 	SkillPath     string `yaml:"skill_path"`
+	BaseBranch    string `yaml:"base_branch"`
 }
 
 type WorkspaceConfig struct {

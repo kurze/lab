@@ -22,6 +22,11 @@ func NewStore(root string) *Store {
 	return &Store{root: root}
 }
 
+// Root returns the path to the .maestro/ directory managed by this store.
+func (s *Store) Root() string {
+	return s.root
+}
+
 func (s *Store) Create(title string) (*Task, error) {
 	id, err := generateID()
 	if err != nil {
