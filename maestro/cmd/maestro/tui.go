@@ -155,13 +155,13 @@ type tuiModel struct {
 	inputBuf   string // title being typed
 
 	// Live log panel state.
-	running   bool       // true while an operation is executing
-	runTitle  string     // e.g. "approve m-20260510-da22"
-	logLines  []string   // captured output lines
-	logScroll int        // scroll offset (from bottom)
-	runDone   bool       // true after operation finishes (waiting for key)
-	runErr    error      // error from completed operation
-	program   *tea.Program // reference to the running Program (set externally)
+	running   bool     // true while an operation is executing
+	runTitle  string   // e.g. "approve m-20260510-da22"
+	logLines  []string // captured output lines
+	logScroll int      // scroll offset (from bottom)
+	runDone   bool     // true after operation finishes (waiting for key)
+	runErr    error    // error from completed operation
+	programRef **tea.Program // shared pointer so the value-copied model can reach the program
 
 	// Operation dispatch (set before TUI starts so operations run inside).
 	configPath string
@@ -170,6 +170,7 @@ type tuiModel struct {
 }
 
 func runTUI(tasks []*task.Task, store *task.Store, configPath string, noJira bool, agentType string) error {
+	var pRef *tea.Program
 	m := tuiModel{
 		tasks:      tasks,
 		store:      store,
@@ -179,12 +180,13 @@ func runTUI(tasks []*task.Task, store *task.Store, configPath string, noJira boo
 		configPath: configPath,
 		noJira:     noJira,
 		agentType:  agentType,
+		programRef: &pRef,
 	}
 	if len(tasks) > 0 {
 		m.loadGraphForSelected()
 	}
 	p := tea.NewProgram(m, tea.WithAltScreen())
-	m.program = p
+	pRef = p
 	_, err := p.Run()
 	return err
 }
@@ -365,9 +367,10 @@ func (m *tuiModel) startOperation(action TUIAction, taskID string) tea.Cmd {
 
 	configPath := m.configPath
 	noJira := m.noJira
+	progRef := m.programRef
 
 	return func() tea.Msg {
-		restore := captureOutputs(m.program)
+		restore := captureOutputs(*progRef)
 		defer restore()
 
 		var err error
