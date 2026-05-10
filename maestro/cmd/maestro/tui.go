@@ -88,6 +88,7 @@ const (
 	TUIRework              // user pressed 'r' to rework a LOCAL_REVIEW task
 	TUIPush                // user pressed 'p' to push a LOCAL_REVIEW task
 	TUIResume              // user pressed 'R' to resume a stuck task
+	TUIRebase              // user pressed 'b' to rebase on base branch
 )
 
 // ---------------------------------------------------------------------------
@@ -305,6 +306,10 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.cursor < len(m.tasks) && m.tasks[m.cursor].State == fsm.LocalReview {
 				return m, m.startOperation(TUIPush, m.tasks[m.cursor].ID)
 			}
+		case "b":
+			if m.cursor < len(m.tasks) && m.tasks[m.cursor].State == fsm.LocalReview {
+				return m, m.startOperation(TUIRebase, m.tasks[m.cursor].ID)
+			}
 		case "R":
 			if m.cursor < len(m.tasks) {
 				s := m.tasks[m.cursor].State
@@ -362,6 +367,8 @@ func (m *tuiModel) startOperation(action TUIAction, taskID string) tea.Cmd {
 		actionName = "push"
 	case TUIResume:
 		actionName = "resume"
+	case TUIRebase:
+		actionName = "rebase"
 	}
 	m.runTitle = fmt.Sprintf("%s %s", actionName, taskID)
 
@@ -385,6 +392,8 @@ func (m *tuiModel) startOperation(action TUIAction, taskID string) tea.Cmd {
 			err = cmdPush(configPath, taskID, noJira)
 		case TUIResume:
 			err = cmdResume(configPath, taskID, noJira)
+		case TUIRebase:
+			err = cmdRebase(configPath, taskID)
 		}
 
 		return operationDoneMsg{err: err}
@@ -539,6 +548,7 @@ func (m tuiModel) renderFooter() string {
 		case fsm.LocalReview:
 			keys = append(keys,
 				struct{ key, label string }{"p", "push"},
+				struct{ key, label string }{"b", "rebase"},
 				struct{ key, label string }{"r", "rework"},
 			)
 		case fsm.AIReview, fsm.AIFix:

@@ -19,6 +19,7 @@ Usage:
   maestro replan <id> [feedback]  Re-invoke planner with optional instructions
   maestro review <id>             Open diff for local review
   maestro push <id>               Push branch, print MR URL
+  maestro rebase <id>             Rebase worktree on base branch
   maestro rework <id> [feedback]  Send back to AI fix with optional instructions
   maestro abandon <id>            Remove worktree, archive task
   maestro resume <id>             Re-enter current phase
@@ -147,6 +148,14 @@ func main() {
 		}
 		if err := cmdPush(configPath, subargs[0], noJira); err != nil {
 			fatalf("push: %v\n", err)
+		}
+
+	case "rebase":
+		if len(subargs) < 1 {
+			fatalf("maestro rebase requires a task ID\n")
+		}
+		if err := cmdRebase(configPath, subargs[0]); err != nil {
+			fatalf("rebase: %v\n", err)
 		}
 
 	case "rework":

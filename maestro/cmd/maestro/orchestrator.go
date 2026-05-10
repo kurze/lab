@@ -565,6 +565,50 @@ func cmdReview(configPath, id string) error {
 	return nil
 }
 
+func cmdRebase(configPath, id string) error {
+	cfg, store, _, err := loadConfigAndStore(configPath)
+	if err != nil {
+		return err
+	}
+
+	t, err := store.Resolve(id)
+	if err != nil {
+		return err
+	}
+
+	if t.WorktreePath == nil {
+		return fmt.Errorf("task %s has no worktree", t.ID)
+	}
+
+	baseBranch := cfg.Review.BaseBranch
+	if baseBranch == "" {
+		baseBranch = "origin/main"
+	}
+
+	// Fetch latest.
+	fmt.Printf("Fetching %s...\n", baseBranch)
+	fetch := exec.Command("git", "fetch", strings.SplitN(baseBranch, "/", 2)[0])
+	fetch.Dir = *t.WorktreePath
+	fetch.Stdout = os.Stdout
+	fetch.Stderr = os.Stderr
+	if err := fetch.Run(); err != nil {
+		return fmt.Errorf("git fetch: %w", err)
+	}
+
+	// Rebase.
+	fmt.Printf("Rebasing on %s...\n", baseBranch)
+	rebase := exec.Command("git", "rebase", baseBranch)
+	rebase.Dir = *t.WorktreePath
+	rebase.Stdout = os.Stdout
+	rebase.Stderr = os.Stderr
+	if err := rebase.Run(); err != nil {
+		return fmt.Errorf("git rebase failed — resolve conflicts in %s and run: git rebase --continue", *t.WorktreePath)
+	}
+
+	fmt.Println("Rebase complete.")
+	return nil
+}
+
 // cmdPush pushes the branch and prints the MR URL.
 func cmdPush(configPath, id string, noJira bool) error {
 	cfg, store, _, err := loadConfigAndStore(configPath)
