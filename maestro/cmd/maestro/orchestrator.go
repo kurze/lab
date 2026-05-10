@@ -232,39 +232,52 @@ func cmdNew(configPath, title, jiraKey string, noJira bool, agentType string) er
 }
 
 func cmdStatus(configPath string, noJira bool, agentType string) error {
-	_, store, _, err := loadConfigAndStore(configPath)
-	if err != nil {
-		return err
-	}
-
-	tasks, err := store.List()
-	if err != nil {
-		return fmt.Errorf("list tasks: %w", err)
-	}
-
-	action, title, err := runTUI(tasks, store)
-	if err != nil {
-		return err
-	}
-
-	switch action {
-	case TUINewTask:
-		if title != "" {
-			return cmdNew(configPath, title, "", noJira, agentType)
+	for {
+		_, store, _, err := loadConfigAndStore(configPath)
+		if err != nil {
+			return err
 		}
-	case TUIApprove:
-		return cmdApprove(configPath, title, noJira)
-	case TUIReplan:
-		return cmdReplan(configPath, title, "", noJira)
-	case TUIRework:
-		return cmdRework(configPath, title, "", noJira)
-	case TUIPush:
-		return cmdPush(configPath, title, noJira)
-	case TUIResume:
-		return cmdResume(configPath, title, noJira)
-	}
 
-	return nil
+		tasks, err := store.List()
+		if err != nil {
+			return fmt.Errorf("list tasks: %w", err)
+		}
+
+		action, param, err := runTUI(tasks, store)
+		if err != nil {
+			return err
+		}
+
+		if action == TUIQuit {
+			return nil
+		}
+
+		var actionErr error
+		switch action {
+		case TUINewTask:
+			if param != "" {
+				actionErr = cmdNew(configPath, param, "", noJira, agentType)
+			}
+		case TUIApprove:
+			actionErr = cmdApprove(configPath, param, noJira)
+		case TUIReplan:
+			actionErr = cmdReplan(configPath, param, "", noJira)
+		case TUIRework:
+			actionErr = cmdRework(configPath, param, "", noJira)
+		case TUIPush:
+			actionErr = cmdPush(configPath, param, noJira)
+		case TUIResume:
+			actionErr = cmdResume(configPath, param, noJira)
+		}
+
+		if actionErr != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", actionErr)
+		}
+
+		// Pause so the user can read output before TUI takes over.
+		fmt.Print("\nPress Enter to return to maestro...")
+		fmt.Scanln()
+	}
 }
 
 // cmdPlan pretty-prints the task graph for a task.
