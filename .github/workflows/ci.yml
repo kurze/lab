@@ -83,6 +83,22 @@ jobs:
       - run: go build ./...
       - run: go vet ./...
 
+  maestro:
+    name: maestro
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: maestro
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache-dependency-path: maestro/go.sum
+      - run: go build ./...
+      - run: go test ./...
+      - run: go vet ./...
+
   rfc863:
     name: rfc863
     runs-on: ubuntu-latest
