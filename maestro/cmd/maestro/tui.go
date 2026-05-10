@@ -951,6 +951,19 @@ func (m tuiModel) renderDetail(width, height int) string {
 		rows = append(rows, "")
 	}
 
+	if t.WorktreePath != nil {
+		rows = append(rows, labelStyle.Render("worktree"))
+		rows = append(rows, "  "+valueStyle.Render(*t.WorktreePath))
+		rows = append(rows, "")
+
+		if t.State == fsm.LocalReview {
+			hintStyle := lipgloss.NewStyle().Foreground(colMuted).Italic(true)
+			rows = append(rows, hintStyle.Render("  cd "+*t.WorktreePath))
+			rows = append(rows, hintStyle.Render("  git log --oneline"))
+			rows = append(rows, "")
+		}
+	}
+
 	// Show sub-task progress if there's a graph.
 	if m.graph != nil && len(m.graph.Tasks) > 0 {
 		done, _, _, totalTokens := graphStats(m.graph)
