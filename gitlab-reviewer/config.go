@@ -22,6 +22,7 @@ type Config struct {
 	ForgeURL      string    `toml:"forge_url"`
 	Token         string    `toml:"token"`
 	Project       string    `toml:"project"`
+	ReviewEngine  string    `toml:"review_engine"`
 	ReviewCommand string    `toml:"review_command"`
 	ReviewAgent   string    `toml:"review_agent"`
 	RepoPath      string    `toml:"repo_path"`
@@ -75,11 +76,26 @@ func loadConfig(path string) Config {
 	if v := os.Getenv("REVIEW_LLM_MODEL"); v != "" {
 		cfg.LLM.Model = v
 	}
+	if v := os.Getenv("REVIEW_ENGINE"); v != "" {
+		cfg.ReviewEngine = v
+	}
 	if v := os.Getenv("REVIEW_MODE"); v != "" {
 		cfg.ReviewMode = v
 	}
 
 	return cfg
+}
+
+func (c Config) validateReviewEngine() error {
+	switch c.ReviewEngine {
+	case "", "llm", "claude-code":
+	default:
+		return fmt.Errorf("invalid review_engine %q (valid: llm, claude-code)", c.ReviewEngine)
+	}
+	if c.ReviewCommand == "" && c.ReviewEngine != "claude-code" && c.LLM.URL == "" {
+		return fmt.Errorf("review engine required: set review_engine=claude-code, review_command, or [llm] url in config")
+	}
+	return nil
 }
 
 func (c Config) Validate() error {
@@ -89,8 +105,8 @@ func (c Config) Validate() error {
 	if c.Project == "" {
 		return fmt.Errorf("project required: set project in config or use --project flag")
 	}
-	if c.ReviewCommand == "" && c.LLM.URL == "" {
-		return fmt.Errorf("review engine required: set review_command or [llm] url in config")
+	if err := c.validateReviewEngine(); err != nil {
+		return err
 	}
 	switch c.ReviewMode {
 	case "", "full", "commits", "both":

@@ -29,6 +29,11 @@
 # Minimum severity for inline comments: "info", "minor", "major", "critical" (default: "minor")
 # inline_severity = "minor"
 
+# Review engine: "llm" (default) or "claude-code"
+#   llm        = use the [llm] config below with the in-house agent loop
+#   claude-code = shell out to `claude -p` (Claude Code CLI) with read-only tools
+# review_engine = "claude-code"
+
 # External review command (receives diff on stdin, outputs JSON)
 # review_command = "my-reviewer"
 # review_agent = "my-reviewer/v1"

@@ -42,8 +42,8 @@ func main() {
 	}
 
 	if *branch != "" {
-		if cfg.ReviewCommand == "" && cfg.LLM.URL == "" {
-			fmt.Fprintf(os.Stderr, "error: review engine required: set review_command or [llm] url in config\n")
+		if err := cfg.validateReviewEngine(); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			os.Exit(1)
 		}
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -195,6 +195,9 @@ func runBranch(ctx context.Context, cfg Config, branchName string) error {
 func newReviewer(cfg Config) Reviewer {
 	if cfg.ReviewCommand != "" {
 		return &CommandReviewer{Command: cfg.ReviewCommand, Agent: cfg.ReviewAgent}
+	}
+	if cfg.ReviewEngine == "claude-code" {
+		return &ClaudeCodeReviewer{Model: cfg.LLM.Model}
 	}
 	return &LLMReviewer{
 		LLM:          agentcore.NewLLMClient(cfg.LLM.URL),
