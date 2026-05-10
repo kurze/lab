@@ -41,18 +41,29 @@ const (
 	statusError
 )
 
+type commitProgress struct {
+	index    int
+	total    int
+	sha      string
+	message  string
+	status   CommitStatus
+	err      error
+	findings []Finding
+}
+
 type prItem struct {
-	pr            PullRequest
-	reviewed      bool
-	posted        bool
-	status        prStatus
-	result        *ReviewResult
-	commitResults []CommitReviewResult
-	branchResult  *ReviewResult
-	err           error
-	selected      bool
-	reviewMode    string
-	progress      string
+	pr             PullRequest
+	reviewed       bool
+	posted         bool
+	status         prStatus
+	result         *ReviewResult
+	commitResults  []CommitReviewResult
+	branchResult   *ReviewResult
+	err            error
+	selected       bool
+	reviewMode     string
+	progress       string
+	commitProgress []commitProgress
 }
 
 var modeLabels = []string{"full", "commits", "both"}
@@ -82,6 +93,28 @@ type reviewProgressMsg struct {
 	total   int
 	sha     string
 	message string
+}
+
+type commitStartedMsg struct {
+	id    int64
+	index int
+	total int
+	sha   string
+	msg   string
+}
+
+type commitDoneMsg struct {
+	id       int64
+	index    int
+	sha      string
+	findings []Finding
+}
+
+type commitFailedMsg struct {
+	id    int64
+	index int
+	sha   string
+	err   error
 }
 
 type reviewDoneMsg struct {
@@ -248,6 +281,51 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case commitStartedMsg:
+		for i := range m.items {
+			if m.items[i].pr.ID == msg.id {
+				m.items[i].commitProgress = append(m.items[i].commitProgress, commitProgress{
+					index:   msg.index,
+					total:   msg.total,
+					sha:     msg.sha,
+					message: msg.msg,
+					status:  CommitStarted,
+				})
+				break
+			}
+		}
+		return m, nil
+
+	case commitDoneMsg:
+		for i := range m.items {
+			if m.items[i].pr.ID == msg.id {
+				for j := range m.items[i].commitProgress {
+					if m.items[i].commitProgress[j].index == msg.index {
+						m.items[i].commitProgress[j].status = CommitDone
+						m.items[i].commitProgress[j].findings = msg.findings
+						break
+					}
+				}
+				break
+			}
+		}
+		return m, nil
+
+	case commitFailedMsg:
+		for i := range m.items {
+			if m.items[i].pr.ID == msg.id {
+				for j := range m.items[i].commitProgress {
+					if m.items[i].commitProgress[j].index == msg.index {
+						m.items[i].commitProgress[j].status = CommitFailed
+						m.items[i].commitProgress[j].err = msg.err
+						break
+					}
+				}
+				break
+			}
+		}
+		return m, nil
+
 	case reviewDoneMsg:
 		for i := range m.items {
 			if m.items[i].pr.ID == msg.id {
@@ -397,9 +475,25 @@ func (m model) reviewOne(pr PullRequest, mode string) tea.Cmd {
 		defer cleanup()
 
 		progress := ProgressFunc(func(ev CommitProgressEvent) {
-			if *m.programRef != nil {
-				(*m.programRef).Send(reviewProgressMsg{
-					id: pr.ID, current: ev.Index, total: ev.Total, sha: ev.SHA, message: ev.Message,
+			if *m.programRef == nil {
+				return
+			}
+			switch ev.Status {
+			case CommitStarted:
+				(*m.programRef).Send(commitStartedMsg{
+					id: pr.ID, index: ev.Index, total: ev.Total, sha: ev.SHA, msg: ev.Message,
+				})
+			case CommitDone:
+				var findings []Finding
+				if ev.Result != nil {
+					findings = ev.Result.Findings
+				}
+				(*m.programRef).Send(commitDoneMsg{
+					id: pr.ID, index: ev.Index, sha: ev.SHA, findings: findings,
+				})
+			case CommitFailed:
+				(*m.programRef).Send(commitFailedMsg{
+					id: pr.ID, index: ev.Index, sha: ev.SHA, err: ev.Err,
 				})
 			}
 		})
@@ -707,13 +801,76 @@ func (m model) View() string {
 				}
 			}
 		case statusReviewing:
-			if item.progress != "" {
+			if len(item.commitProgress) > 0 {
+				if item.progress != "" {
+					b.WriteString(statusWarn.Render(fmt.Sprintf("  reviewing — %s", item.progress)))
+					b.WriteByte('\n')
+					detailLines++
+				}
+				var inflight, completed, failed []commitProgress
+				for _, cp := range item.commitProgress {
+					switch cp.status {
+					case CommitStarted:
+						inflight = append(inflight, cp)
+					case CommitDone:
+						completed = append(completed, cp)
+					case CommitFailed:
+						failed = append(failed, cp)
+					}
+				}
+				sort.Slice(completed, func(i, j int) bool {
+					return completed[i].index < completed[j].index
+				})
+				for _, cp := range inflight {
+					if detailLines >= detailHeight-1 {
+						break
+					}
+					line := statusWarn.Render(fmt.Sprintf("  ⟳ commit %d/%d: %s %s", cp.index, cp.total, cp.sha, cp.message))
+					if lipgloss.Width(line) > m.width {
+						line = ansi.Truncate(line, m.width, "")
+					}
+					b.WriteString(line)
+					b.WriteByte('\n')
+					detailLines++
+				}
+				for _, cp := range failed {
+					if detailLines >= detailHeight-1 {
+						break
+					}
+					errMsg := "unknown error"
+					if cp.err != nil {
+						errMsg = cp.err.Error()
+					}
+					line := statusErr.Render(fmt.Sprintf("  ✗ commit %d/%d: %s — %s", cp.index, cp.total, cp.sha, errMsg))
+					if lipgloss.Width(line) > m.width {
+						line = ansi.Truncate(line, m.width, "")
+					}
+					b.WriteString(line)
+					b.WriteByte('\n')
+					detailLines++
+				}
+				for _, cp := range completed {
+					if detailLines >= detailHeight-1 {
+						break
+					}
+					n := len(cp.findings)
+					line := statusOK.Render(fmt.Sprintf("  ✓ commit %d/%d: %s %s (%d findings)", cp.index, cp.total, cp.sha, cp.message, n))
+					if lipgloss.Width(line) > m.width {
+						line = ansi.Truncate(line, m.width, "")
+					}
+					b.WriteString(line)
+					b.WriteByte('\n')
+					detailLines++
+				}
+			} else if item.progress != "" {
 				b.WriteString(statusWarn.Render(fmt.Sprintf("  reviewing — %s", item.progress)))
+				b.WriteByte('\n')
+				detailLines++
 			} else {
 				b.WriteString(statusWarn.Render("  reviewing..."))
+				b.WriteByte('\n')
+				detailLines++
 			}
-			b.WriteByte('\n')
-			detailLines++
 		case statusError:
 			b.WriteString(statusErr.Render(fmt.Sprintf("  error: %v", item.err)))
 			b.WriteByte('\n')
