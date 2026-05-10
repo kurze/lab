@@ -396,10 +396,10 @@ func (m model) reviewOne(pr PullRequest, mode string) tea.Cmd {
 		}
 		defer cleanup()
 
-		progress := ProgressFunc(func(current, total int, sha, msg string) {
+		progress := ProgressFunc(func(ev CommitProgressEvent) {
 			if *m.programRef != nil {
 				(*m.programRef).Send(reviewProgressMsg{
-					id: pr.ID, current: current, total: total, sha: sha, message: msg,
+					id: pr.ID, current: ev.Index, total: ev.Total, sha: ev.SHA, message: ev.Message,
 				})
 			}
 		})

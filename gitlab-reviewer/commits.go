@@ -8,7 +8,25 @@ import (
 	"strings"
 )
 
-type ProgressFunc func(current, total int, sha, msg string)
+type CommitStatus string
+
+const (
+	CommitStarted CommitStatus = "started"
+	CommitDone    CommitStatus = "done"
+	CommitFailed  CommitStatus = "failed"
+)
+
+type CommitProgressEvent struct {
+	Index   int
+	Total   int
+	SHA     string
+	Message string
+	Status  CommitStatus
+	Err     error
+	Result  *ReviewResult
+}
+
+type ProgressFunc func(CommitProgressEvent)
 
 type ReviewByCommitsOpts struct {
 	State      *State
@@ -61,7 +79,13 @@ func reviewByCommits(ctx context.Context, forge Forge, reviewer Reviewer, worktr
 
 		log.Printf("  reviewing commit %d/%d: %s %s", i+1, len(commits), sha, msg)
 		if opts != nil && opts.OnProgress != nil {
-			opts.OnProgress(i+1, len(commits), sha, msg)
+			opts.OnProgress(CommitProgressEvent{
+				Index:   i + 1,
+				Total:   len(commits),
+				SHA:     sha,
+				Message: msg,
+				Status:  CommitStarted,
+			})
 		}
 
 		taggedDiff := fmt.Sprintf("Commit: %s — %s\n\n%s", sha, msg, diff)
