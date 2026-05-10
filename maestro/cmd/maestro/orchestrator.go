@@ -682,16 +682,60 @@ func cmdPush(configPath, id string, noJira bool) error {
 	}
 	transitionJira(ctx, trk, t, cfg)
 
-	// Print MR URL.
+	fmt.Printf("Task %s pushed.\n", t.ID)
+
+	// Detect forge and offer MR/PR creation.
 	remote := getRemoteURL(*t.WorktreePath)
 	if remote != "" {
 		mrURL := buildMRURL(remote, *t.BranchName)
 		if mrURL != "" {
-			fmt.Printf("\nCreate MR: %s\n", mrURL)
+			fmt.Printf("\nMR/PR URL: %s\n", mrURL)
 		}
 	}
 
-	fmt.Printf("Task %s pushed.\n", t.ID)
+	return nil
+}
+
+func cmdCreateMR(configPath, id string) error {
+	_, store, _, err := loadConfigAndStore(configPath)
+	if err != nil {
+		return err
+	}
+
+	t, err := store.Resolve(id)
+	if err != nil {
+		return err
+	}
+
+	if t.WorktreePath == nil || t.BranchName == nil {
+		return fmt.Errorf("task %s has no worktree or branch", t.ID)
+	}
+
+	remote := getRemoteURL(*t.WorktreePath)
+
+	if strings.Contains(remote, "github") {
+		fmt.Println("Creating PR with gh...")
+		cmd := exec.Command("gh", "pr", "create", "--fill", "--head", *t.BranchName)
+		cmd.Dir = *t.WorktreePath
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("gh pr create: %w", err)
+		}
+	} else if strings.Contains(remote, "gitlab") {
+		fmt.Println("Creating MR with glab...")
+		cmd := exec.Command("glab", "mr", "create", "--fill", "--source-branch", *t.BranchName)
+		cmd.Dir = *t.WorktreePath
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("glab mr create: %w", err)
+		}
+	} else {
+		mrURL := buildMRURL(remote, *t.BranchName)
+		fmt.Printf("Open manually: %s\n", mrURL)
+	}
+
 	return nil
 }
 
