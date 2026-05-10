@@ -44,12 +44,7 @@ type workItem struct {
 	diff   string
 }
 
-func reviewByCommits(ctx context.Context, forge Forge, reviewer Reviewer, worktreeDir string, pr PullRequest, opts *ReviewByCommitsOpts) ([]CommitReviewResult, error) {
-	commits, err := forge.ListCommits(ctx, pr.ID)
-	if err != nil {
-		return nil, fmt.Errorf("list commits: %w", err)
-	}
-
+func reviewByCommits(ctx context.Context, reviewer Reviewer, worktreeDir string, commits []Commit, opts *ReviewByCommitsOpts) ([]CommitReviewResult, error) {
 	if len(commits) == 0 {
 		return nil, nil
 	}

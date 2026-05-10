@@ -500,7 +500,11 @@ func (m model) reviewOne(pr PullRequest, mode string) tea.Cmd {
 
 		switch mode {
 		case "both":
-			commitResults, err := reviewByCommits(ctx, m.forge, m.reviewer, worktreeDir, pr, &ReviewByCommitsOpts{State: m.state, Project: m.cfg.Project, OnProgress: progress})
+			commits, err := m.forge.ListCommits(ctx, pr.ID)
+			if err != nil {
+				return reviewDoneMsg{id: pr.ID, err: fmt.Errorf("list commits: %w", err)}
+			}
+			commitResults, err := reviewByCommits(ctx, m.reviewer, worktreeDir, commits, &ReviewByCommitsOpts{State: m.state, Project: m.cfg.Project, OnProgress: progress, Concurrency: m.cfg.CommitConcurrency()})
 			if err != nil {
 				return reviewDoneMsg{id: pr.ID, err: err}
 			}
@@ -529,7 +533,11 @@ func (m model) reviewOne(pr PullRequest, mode string) tea.Cmd {
 			return reviewDoneMsg{id: pr.ID, result: merged, commitResults: commitResults, branchResult: branchResult}
 
 		case "commits":
-			commitResults, err := reviewByCommits(ctx, m.forge, m.reviewer, worktreeDir, pr, &ReviewByCommitsOpts{State: m.state, Project: m.cfg.Project, OnProgress: progress})
+			commits, err := m.forge.ListCommits(ctx, pr.ID)
+			if err != nil {
+				return reviewDoneMsg{id: pr.ID, err: fmt.Errorf("list commits: %w", err)}
+			}
+			commitResults, err := reviewByCommits(ctx, m.reviewer, worktreeDir, commits, &ReviewByCommitsOpts{State: m.state, Project: m.cfg.Project, OnProgress: progress, Concurrency: m.cfg.CommitConcurrency()})
 			if err != nil {
 				return reviewDoneMsg{id: pr.ID, err: err}
 			}

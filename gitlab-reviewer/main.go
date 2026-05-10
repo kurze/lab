@@ -8,7 +8,6 @@ import (
 	"log"
 	"os"
 	"os/signal"
-	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/kurze/lab/agentcore"
@@ -121,31 +120,23 @@ func runBranch(ctx context.Context, cfg Config, branchName string) error {
 
 	switch mode {
 	case "commits", "both":
-		var commitResults []CommitReviewResult
-		for i, commit := range commits {
-			sha := commit.SHA
-			if len(sha) > 8 {
-				sha = sha[:8]
+		progress := ProgressFunc(func(ev CommitProgressEvent) {
+			sha := ev.SHA
+			switch ev.Status {
+			case CommitStarted:
+				fmt.Fprintf(os.Stderr, "  ⟳ commit %d/%d: %s %s\n", ev.Index, ev.Total, sha, ev.Message)
+			case CommitDone:
+				fmt.Fprintf(os.Stderr, "  ✓ commit %d/%d: %s %s\n", ev.Index, ev.Total, sha, ev.Message)
+			case CommitFailed:
+				fmt.Fprintf(os.Stderr, "  ✗ commit %d/%d: %s %s — %v\n", ev.Index, ev.Total, sha, ev.Message, ev.Err)
 			}
-			msg := firstline(commit.Message)
-			log.Printf("  reviewing commit %d/%d: %s %s", i+1, len(commits), sha, msg)
-
-			diff, err := commitDiff(cfg.RepoPath, commit.SHA)
-			if err != nil {
-				log.Printf("  skip commit %s: %v", sha, err)
-				continue
-			}
-			if strings.TrimSpace(diff) == "" {
-				continue
-			}
-
-			taggedDiff := fmt.Sprintf("Commit: %s — %s\n\n%s", sha, msg, diff)
-			r, err := reviewer.Review(ctx, cfg.RepoPath, taggedDiff)
-			if err != nil {
-				log.Printf("  commit %s review failed: %v", sha, err)
-				continue
-			}
-			commitResults = append(commitResults, CommitReviewResult{Commit: commit, Result: r})
+		})
+		commitResults, err := reviewByCommits(ctx, reviewer, cfg.RepoPath, commits, &ReviewByCommitsOpts{
+			OnProgress:  progress,
+			Concurrency: cfg.CommitConcurrency(),
+		})
+		if err != nil {
+			return fmt.Errorf("commit review: %w", err)
 		}
 
 		if mode == "both" {
@@ -260,7 +251,13 @@ func run(ctx context.Context, cfg Config, state *State, singleMR int64) error {
 
 		switch cfg.ReviewMode {
 		case "both":
-			commitResults, err := reviewByCommits(ctx, forge, reviewer, worktreeDir, pr, &ReviewByCommitsOpts{State: state, Project: cfg.Project})
+			commits, err := forge.ListCommits(ctx, pr.ID)
+			if err != nil {
+				cleanup()
+				log.Printf("skip #%d: list commits: %v", pr.ID, err)
+				continue
+			}
+			commitResults, err := reviewByCommits(ctx, reviewer, worktreeDir, commits, &ReviewByCommitsOpts{State: state, Project: cfg.Project, Concurrency: cfg.CommitConcurrency()})
 			if err != nil {
 				cleanup()
 				log.Printf("skip #%d: commit review: %v", pr.ID, err)
@@ -300,7 +297,13 @@ func run(ctx context.Context, cfg Config, state *State, singleMR int64) error {
 			comment = FormatBothReviewComment(commitResults, branchResult, pr.Title, merged.Model)
 
 		case "commits":
-			commitResults, err := reviewByCommits(ctx, forge, reviewer, worktreeDir, pr, &ReviewByCommitsOpts{State: state, Project: cfg.Project})
+			commits, err := forge.ListCommits(ctx, pr.ID)
+			if err != nil {
+				cleanup()
+				log.Printf("skip #%d: list commits: %v", pr.ID, err)
+				continue
+			}
+			commitResults, err := reviewByCommits(ctx, reviewer, worktreeDir, commits, &ReviewByCommitsOpts{State: state, Project: cfg.Project, Concurrency: cfg.CommitConcurrency()})
 			cleanup()
 			if err != nil {
 				log.Printf("skip #%d: review: %v", pr.ID, err)
