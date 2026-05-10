@@ -327,7 +327,7 @@ func run(ctx context.Context, cfg Config, state *State, singleMR int64) error {
 
 		style := cfg.CommentStyle
 		if style == "" {
-			style = "summary"
+			style = "both"
 		}
 
 		postInline := (style == "inline" || style == "both") && len(result.Findings) > 0

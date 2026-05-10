@@ -501,7 +501,7 @@ func (m model) postOne(item prItem) tea.Cmd {
 		}
 		style := m.cfg.CommentStyle
 		if style == "" {
-			style = "summary"
+			style = "both"
 		}
 		if (style == "inline" || style == "both") && item.result != nil && len(item.result.Findings) > 0 {
 			inlineComments, _ := routeFindings(item.result.Findings, m.cfg.InlineSeverity)
