@@ -10,6 +10,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 type filter int
@@ -531,10 +532,18 @@ var (
 	statusErr     = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
 	statusWarn    = lipgloss.NewStyle().Foreground(lipgloss.Color("11"))
 	actionBar     = lipgloss.NewStyle().Foreground(lipgloss.Color("7")).Background(lipgloss.Color("0"))
+	actionKey     = lipgloss.NewStyle().Foreground(lipgloss.Color("14")).Background(lipgloss.Color("0"))
 	sevCritical   = lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true)
 	sevMajor      = lipgloss.NewStyle().Foreground(lipgloss.Color("208"))
 	sevMinor      = lipgloss.NewStyle().Foreground(lipgloss.Color("11"))
 	sevInfo       = lipgloss.NewStyle().Foreground(lipgloss.Color("12"))
+	mrNumStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("14"))
+	authorStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
+	titleStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("15"))
+	ageStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	separatorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	detailTitle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("15"))
+	detailLabel   = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 )
 
 func (m model) View() string {
@@ -624,17 +633,25 @@ func (m model) View() string {
 		}
 
 		age := relativeTime(item.pr.UpdatedAt)
-		line := fmt.Sprintf("%s %s %s #%-5d %-15s %-6s %s",
-			prefix, statusIcon, reviewedMark, item.pr.ID, item.pr.Author, age, item.pr.Title)
 
-		if len(line) > m.width {
-			line = line[:m.width]
+		var line string
+		if isCursor {
+			line = cursorStyle.Render(fmt.Sprintf("%s %s %s #%-5d %-15s %-6s %s",
+				prefix, statusIcon, reviewedMark, item.pr.ID, item.pr.Author, age, item.pr.Title))
+		} else if item.selected {
+			line = selectedStyle.Render(fmt.Sprintf("%s %s %s #%-5d %-15s %-6s %s",
+				prefix, statusIcon, reviewedMark, item.pr.ID, item.pr.Author, age, item.pr.Title))
+		} else {
+			line = fmt.Sprintf("%s %s %s %s %-15s %s %s",
+				prefix, statusIcon, reviewedMark,
+				mrNumStyle.Render(fmt.Sprintf("#%-5d", item.pr.ID)),
+				authorStyle.Render(item.pr.Author),
+				ageStyle.Render(fmt.Sprintf("%-6s", age)),
+				titleStyle.Render(item.pr.Title))
 		}
 
-		if isCursor {
-			line = cursorStyle.Render(line)
-		} else if item.selected {
-			line = selectedStyle.Render(line)
+		if lipgloss.Width(line) > m.width {
+			line = ansi.Truncate(line, m.width, "")
 		}
 
 		b.WriteString(line)
@@ -648,7 +665,7 @@ func (m model) View() string {
 	}
 
 	// Detail pane
-	b.WriteString(strings.Repeat("─", m.width))
+	b.WriteString(separatorStyle.Render(strings.Repeat("─", m.width)))
 	b.WriteByte('\n')
 
 	detailLines := 0
@@ -681,8 +698,8 @@ func (m model) View() string {
 				}
 				for i := m.detailScroll; i < len(lines) && detailLines < detailHeight-1; i++ {
 					line := lines[i]
-					if len(line) > m.width {
-						line = line[:m.width]
+					if lipgloss.Width(line) > m.width {
+						line = ansi.Truncate(line, m.width, "")
 					}
 					b.WriteString(line)
 					b.WriteByte('\n')
@@ -702,15 +719,15 @@ func (m model) View() string {
 			b.WriteByte('\n')
 			detailLines++
 		default:
-			b.WriteString(fmt.Sprintf("  %s", item.pr.Title))
+			b.WriteString("  " + detailTitle.Render(item.pr.Title))
 			b.WriteByte('\n')
 			detailLines++
 			if detailLines < detailHeight-1 {
-				meta := fmt.Sprintf("  author: %s", item.pr.Author)
+				meta := detailLabel.Render("  author: ") + authorStyle.Render(item.pr.Author)
 				if !item.pr.UpdatedAt.IsZero() {
-					meta += fmt.Sprintf("  updated: %s ago", relativeTime(item.pr.UpdatedAt))
+					meta += detailLabel.Render("  updated: ") + ageStyle.Render(relativeTime(item.pr.UpdatedAt)+" ago")
 				}
-				b.WriteString(dimStyle.Render(meta))
+				b.WriteString(meta)
 				b.WriteByte('\n')
 				detailLines++
 			}
@@ -727,16 +744,16 @@ func (m model) View() string {
 	}
 
 	// Action bar
-	actions := []string{
-		"j/k:navigate", "J/K:scroll", "space:select", "a:select all",
-		"tab:filter", "r:review", "R:review all",
-		"p:post", "P:post all", "l:reload", "q:quit",
+	actions := [][2]string{
+		{"j/k", "navigate"}, {"J/K", "scroll"}, {"space", "select"}, {"a", "select all"},
+		{"tab", "filter"}, {"r", "review"}, {"R", "review all"},
+		{"p", "post"}, {"P", "post all"}, {"l", "reload"}, {"q", "quit"},
 	}
-	bar := " " + strings.Join(actions, "  ")
-	if len(bar) > m.width {
-		bar = bar[:m.width]
+	var barParts []string
+	for _, a := range actions {
+		barParts = append(barParts, actionKey.Render(a[0])+actionBar.Render(":"+a[1]))
 	}
-	b.WriteString(actionBar.Render(bar))
+	b.WriteString(actionBar.Render(" ") + strings.Join(barParts, actionBar.Render("  ")))
 
 	return b.String()
 }
