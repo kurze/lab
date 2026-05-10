@@ -127,6 +127,7 @@ agents:
 func TestValidationMissingBaseURL(t *testing.T) {
 	config := `
 jira:
+  email: "user@example.com"
   project_key: "TEST"
 agents:
   coder:
@@ -135,7 +136,7 @@ agents:
 	path := writeConfig(t, config)
 	_, err := Load(path)
 	if err == nil {
-		t.Fatal("expected error for missing base_url")
+		t.Fatal("expected error for missing base_url when jira is partially configured")
 	}
 }
 
@@ -151,6 +152,19 @@ agents:
 	_, err := Load(path)
 	if err == nil {
 		t.Fatal("expected error for missing project_key")
+	}
+}
+
+func TestValidationNoJiraIsValid(t *testing.T) {
+	config := `
+agents:
+  coder:
+    type: "claude-code"
+`
+	path := writeConfig(t, config)
+	_, err := Load(path)
+	if err != nil {
+		t.Fatalf("expected no error without jira config, got: %v", err)
 	}
 }
 
