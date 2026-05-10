@@ -86,11 +86,14 @@ func RunReview(
 		return 0, "", fmt.Errorf("reviewer agent: %w", err)
 	}
 
-	// Parse the verdict from the output.
 	verdict, err := ParseVerdict(output)
 	if err != nil {
 		reportPath, _ := writeReport(taskDir, iteration, output)
-		return 0, reportPath, fmt.Errorf("parse verdict: %w", err)
+		if strings.TrimSpace(output) == "" {
+			return 0, reportPath, fmt.Errorf("reviewer returned empty output")
+		}
+		fmt.Fprintf(os.Stderr, "warning: %v — defaulting to NEEDS_FIX\n", err)
+		verdict = NeedsFix
 	}
 
 	reportPath, err := writeReport(taskDir, iteration, output)

@@ -39,7 +39,7 @@ func (a *LocalAgent) Run(ctx context.Context, worktree string, prompt string) (s
 			{Role: "user", Content: prompt},
 		},
 		Temperature: 0.5,
-		MaxTokens:   4096,
+		MaxTokens:   8192,
 	})
 	if err != nil {
 		return "", fmt.Errorf("local LLM call failed: %w", err)
