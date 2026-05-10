@@ -56,7 +56,7 @@ func makeAgent(cfg config.AgentConfig, mode agent.Mode) agent.Agent {
 	case "claude-code":
 		return claude.New(mode)
 	case "local-llm":
-		return local.New(cfg.Endpoint, cfg.Model)
+		return local.New(cfg.Endpoint, cfg.Model, cfg.MaxTokens)
 	default:
 		return claude.New(mode)
 	}
@@ -65,7 +65,7 @@ func makeAgent(cfg config.AgentConfig, mode agent.Mode) agent.Agent {
 func makeGrillAgent(agentType string, cfg config.Config) agent.Agent {
 	switch agentType {
 	case "local":
-		return local.New(cfg.Agents.Reviewer.Endpoint, cfg.Agents.Reviewer.Model)
+		return local.New(cfg.Agents.Reviewer.Endpoint, cfg.Agents.Reviewer.Model, cfg.Agents.Reviewer.MaxTokens)
 	default:
 		return claude.New(agent.Interactive)
 	}

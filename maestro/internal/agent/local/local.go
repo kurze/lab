@@ -13,16 +13,20 @@ import (
 // LocalAgent sends prompts to a local LLM via the llama.cpp-compatible
 // /v1/chat/completions endpoint, using agentcore.LLMClient.
 type LocalAgent struct {
-	llm   *agentcore.LLMClient
-	model string
+	llm       *agentcore.LLMClient
+	model     string
+	maxTokens int
 }
 
-// New creates a LocalAgent that calls the given endpoint with the specified model name.
-func New(endpoint, model string) *LocalAgent {
+func New(endpoint, model string, maxTokens int) *LocalAgent {
 	url := strings.TrimRight(endpoint, "/") + "/v1/chat/completions"
+	if maxTokens <= 0 {
+		maxTokens = 32768
+	}
 	return &LocalAgent{
-		llm:   agentcore.NewLLMClient(url),
-		model: model,
+		llm:       agentcore.NewLLMClient(url),
+		model:     model,
+		maxTokens: maxTokens,
 	}
 }
 
@@ -39,7 +43,7 @@ func (a *LocalAgent) Run(ctx context.Context, worktree string, prompt string) (s
 			{Role: "user", Content: prompt},
 		},
 		Temperature: 0.5,
-		MaxTokens:   16384,
+		MaxTokens:   a.maxTokens,
 	})
 	if err != nil {
 		return "", fmt.Errorf("local LLM call failed: %w", err)

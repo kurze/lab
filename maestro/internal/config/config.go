@@ -22,6 +22,7 @@ type AgentConfig struct {
 	Endpoint    string `yaml:"endpoint,omitempty"`
 	Model       string `yaml:"model,omitempty"`
 	TokenBudget int    `yaml:"token_budget,omitempty"`
+	MaxTokens   int    `yaml:"max_tokens,omitempty"`
 }
 
 type AgentsConfig struct {
