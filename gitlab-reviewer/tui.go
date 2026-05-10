@@ -196,6 +196,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.items[m.pickTarget].reviewMode = modeLabels[m.modeChoice]
 				m.items[m.pickTarget].status = statusReviewing
 				m.items[m.pickTarget].progress = fmt.Sprintf("mode: %s — fetching...", modeLabels[m.modeChoice])
+				m.items[m.pickTarget].commitProgress = nil
 				return m, m.reviewOne(m.items[m.pickTarget].pr, modeLabels[m.modeChoice])
 			case "esc", "q":
 				m.pickingMode = false
@@ -299,12 +300,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case commitDoneMsg:
 		for i := range m.items {
 			if m.items[i].pr.ID == msg.id {
+				found := false
 				for j := range m.items[i].commitProgress {
 					if m.items[i].commitProgress[j].index == msg.index {
 						m.items[i].commitProgress[j].status = CommitDone
 						m.items[i].commitProgress[j].findings = msg.findings
+						found = true
 						break
 					}
+				}
+				if !found {
+					m.items[i].commitProgress = append(m.items[i].commitProgress, commitProgress{
+						index:    msg.index,
+						sha:      msg.sha,
+						status:   CommitDone,
+						findings: msg.findings,
+					})
 				}
 				break
 			}
@@ -314,12 +325,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case commitFailedMsg:
 		for i := range m.items {
 			if m.items[i].pr.ID == msg.id {
+				found := false
 				for j := range m.items[i].commitProgress {
 					if m.items[i].commitProgress[j].index == msg.index {
 						m.items[i].commitProgress[j].status = CommitFailed
 						m.items[i].commitProgress[j].err = msg.err
+						found = true
 						break
 					}
+				}
+				if !found {
+					m.items[i].commitProgress = append(m.items[i].commitProgress, commitProgress{
+						index:  msg.index,
+						sha:    msg.sha,
+						status: CommitFailed,
+						err:    msg.err,
+					})
 				}
 				break
 			}
@@ -441,6 +462,7 @@ func (m model) reviewSelected() tea.Cmd {
 		m.items[i].selected = false
 		m.items[i].reviewMode = mode
 		m.items[i].progress = fmt.Sprintf("mode: %s — fetching...", mode)
+		m.items[i].commitProgress = nil
 		cmds = append(cmds, m.reviewOne(m.items[i].pr, mode))
 	}
 	return tea.Batch(cmds...)
@@ -459,6 +481,7 @@ func (m model) reviewAll() tea.Cmd {
 		m.items[i].status = statusReviewing
 		m.items[i].reviewMode = mode
 		m.items[i].progress = fmt.Sprintf("mode: %s — fetching...", mode)
+		m.items[i].commitProgress = nil
 		cmds = append(cmds, m.reviewOne(m.items[i].pr, mode))
 	}
 	return tea.Batch(cmds...)

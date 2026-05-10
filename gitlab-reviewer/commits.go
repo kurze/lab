@@ -37,7 +37,6 @@ type ReviewByCommitsOpts struct {
 }
 
 type workItem struct {
-	index  int
 	commit Commit
 	sha    string
 	msg    string
@@ -76,7 +75,6 @@ func reviewByCommits(ctx context.Context, reviewer Reviewer, worktreeDir string,
 		}
 
 		items = append(items, workItem{
-			index:  i,
 			commit: commit,
 			sha:    sha,
 			msg:    firstline(commit.Message),
@@ -93,18 +91,12 @@ func reviewByCommits(ctx context.Context, reviewer Reviewer, worktreeDir string,
 		concurrency = opts.Concurrency
 	}
 
-	total := len(commits)
+	total := len(items)
 	results := make([]*CommitReviewResult, len(items))
 	sem := make(chan struct{}, concurrency)
 	var wg sync.WaitGroup
 
 	for wi, item := range items {
-		select {
-		case <-ctx.Done():
-			break
-		default:
-		}
-
 		if ctx.Err() != nil {
 			break
 		}
@@ -114,17 +106,21 @@ func reviewByCommits(ctx context.Context, reviewer Reviewer, worktreeDir string,
 		go func() {
 			defer wg.Done()
 
-			sem <- struct{}{}
+			select {
+			case sem <- struct{}{}:
+			case <-ctx.Done():
+				return
+			}
 			defer func() { <-sem }()
 
 			if ctx.Err() != nil {
 				return
 			}
 
-			log.Printf("  reviewing commit %d/%d: %s %s", item.index+1, total, item.sha, item.msg)
+			log.Printf("  reviewing commit %d/%d: %s %s", wi+1, total, item.sha, item.msg)
 			if opts != nil && opts.OnProgress != nil {
 				opts.OnProgress(CommitProgressEvent{
-					Index:   item.index + 1,
+					Index:   wi + 1,
 					Total:   total,
 					SHA:     item.sha,
 					Message: item.msg,
@@ -138,7 +134,7 @@ func reviewByCommits(ctx context.Context, reviewer Reviewer, worktreeDir string,
 				log.Printf("  commit %s review failed: %v", item.sha, err)
 				if opts != nil && opts.OnProgress != nil {
 					opts.OnProgress(CommitProgressEvent{
-						Index:   item.index + 1,
+						Index:   wi + 1,
 						Total:   total,
 						SHA:     item.sha,
 						Message: item.msg,
@@ -158,7 +154,7 @@ func reviewByCommits(ctx context.Context, reviewer Reviewer, worktreeDir string,
 			}
 			if opts != nil && opts.OnProgress != nil {
 				opts.OnProgress(CommitProgressEvent{
-					Index:   item.index + 1,
+					Index:   wi + 1,
 					Total:   total,
 					SHA:     item.sha,
 					Message: item.msg,
@@ -171,7 +167,7 @@ func reviewByCommits(ctx context.Context, reviewer Reviewer, worktreeDir string,
 
 	wg.Wait()
 
-	var collected []CommitReviewResult
+	collected := make([]CommitReviewResult, 0, len(results))
 	for _, r := range results {
 		if r != nil {
 			collected = append(collected, *r)
