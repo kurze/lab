@@ -11,7 +11,15 @@ import (
 	"maestro/internal/agent"
 )
 
-const maxDiffSize = 200_000 // truncate very large diffs to keep context manageable
+const maxDiffSize = 200_000
+
+const defaultSkill = `Review the code changes for:
+- Correctness: bugs, logic errors, off-by-one, nil/null dereferences
+- Security: injection, path traversal, credential exposure
+- Performance: unnecessary allocations, O(n²) where O(n) is possible
+- Style: naming, dead code, missing error handling
+
+Focus on issues in the changed lines. Do not flag style nits on unchanged code.`
 
 const reviewPromptTemplate = `## Review Skill
 
@@ -54,10 +62,15 @@ func RunReview(
 		return 0, "", fmt.Errorf("empty diff — nothing to review")
 	}
 
-	// Read the review skill file.
-	skillContent, err := os.ReadFile(reviewSkillPath)
-	if err != nil {
-		return 0, "", fmt.Errorf("read review skill %s: %w", reviewSkillPath, err)
+	var skillContent []byte
+	if reviewSkillPath != "" {
+		skillContent, err = os.ReadFile(reviewSkillPath)
+		if err != nil {
+			return 0, "", fmt.Errorf("read review skill %s: %w", reviewSkillPath, err)
+		}
+	}
+	if len(skillContent) == 0 {
+		skillContent = []byte(defaultSkill)
 	}
 
 	// Truncate diff if very large.
