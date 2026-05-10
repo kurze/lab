@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -75,7 +77,7 @@ func layoutFor(width int) layoutMode {
 // Bubble Tea model
 // ---------------------------------------------------------------------------
 
-// TUIAction signals what the caller should do after the TUI exits.
+// TUIAction signals what operation was requested.
 type TUIAction int
 
 const (
@@ -87,6 +89,56 @@ const (
 	TUIPush                // user pressed 'p' to push a LOCAL_REVIEW task
 	TUIResume              // user pressed 'R' to resume a stuck task
 )
+
+// ---------------------------------------------------------------------------
+// Messages for async operation output
+// ---------------------------------------------------------------------------
+
+type logLineMsg string
+type operationDoneMsg struct{ err error }
+type tasksRefreshedMsg struct{ tasks []*task.Task }
+
+// ---------------------------------------------------------------------------
+// Stdout/stderr capture helpers
+// ---------------------------------------------------------------------------
+
+// captureOutputs swaps os.Stdout and os.Stderr with pipes that forward lines
+// to the tea.Program via logLineMsg. Returns a restore function that must be
+// called when the operation finishes.
+func captureOutputs(program *tea.Program) (restore func()) {
+	origStdout := os.Stdout
+	origStderr := os.Stderr
+
+	outR, outW, _ := os.Pipe()
+	errR, errW, _ := os.Pipe()
+
+	os.Stdout = outW
+	os.Stderr = errW
+
+	var wg sync.WaitGroup
+	forward := func(r *os.File) {
+		defer wg.Done()
+		scanner := bufio.NewScanner(r)
+		// Increase buffer for long lines from agent output.
+		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+		for scanner.Scan() {
+			program.Send(logLineMsg(scanner.Text()))
+		}
+	}
+
+	wg.Add(2)
+	go forward(outR)
+	go forward(errR)
+
+	return func() {
+		// Restore originals first so any subsequent writes go to the real terminal.
+		os.Stdout = origStdout
+		os.Stderr = origStderr
+		outW.Close()
+		errW.Close()
+		wg.Wait()
+	}
+}
 
 type tuiModel struct {
 	tasks     []*task.Task
@@ -101,30 +153,40 @@ type tuiModel struct {
 	selectedID string // task ID for approve/replan/push/rework
 	inputMode  bool   // true when typing a new task title
 	inputBuf   string // title being typed
+
+	// Live log panel state.
+	running   bool       // true while an operation is executing
+	runTitle  string     // e.g. "approve m-20260510-da22"
+	logLines  []string   // captured output lines
+	logScroll int        // scroll offset (from bottom)
+	runDone   bool       // true after operation finishes (waiting for key)
+	runErr    error      // error from completed operation
+	program   *tea.Program // reference to the running Program (set externally)
+
+	// Operation dispatch (set before TUI starts so operations run inside).
+	configPath string
+	noJira     bool
+	agentType  string
 }
 
-func runTUI(tasks []*task.Task, store *task.Store) (TUIAction, string, error) {
+func runTUI(tasks []*task.Task, store *task.Store, configPath string, noJira bool, agentType string) error {
 	m := tuiModel{
-		tasks:  tasks,
-		store:  store,
-		width:  120,
-		height: 40,
-		layout: layoutTwoPane,
+		tasks:      tasks,
+		store:      store,
+		width:      120,
+		height:     40,
+		layout:     layoutTwoPane,
+		configPath: configPath,
+		noJira:     noJira,
+		agentType:  agentType,
 	}
 	if len(tasks) > 0 {
 		m.loadGraphForSelected()
 	}
 	p := tea.NewProgram(m, tea.WithAltScreen())
-	result, err := p.Run()
-	if err != nil {
-		return TUIQuit, "", err
-	}
-	final := result.(tuiModel)
-	out := final.inputBuf
-	if final.selectedID != "" {
-		out = final.selectedID
-	}
-	return final.action, out, nil
+	m.program = p
+	_, err := p.Run()
+	return err
 }
 
 func (m tuiModel) Init() tea.Cmd {
@@ -139,7 +201,63 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.layout = layoutFor(m.width)
 		return m, nil
 
+	case logLineMsg:
+		m.logLines = append(m.logLines, string(msg))
+		m.logScroll = 0 // auto-scroll to bottom
+		return m, nil
+
+	case operationDoneMsg:
+		m.runDone = true
+		m.runErr = msg.err
+		if msg.err != nil {
+			m.logLines = append(m.logLines, fmt.Sprintf("[error: %v]", msg.err))
+		} else {
+			m.logLines = append(m.logLines, "[done]")
+		}
+		m.logScroll = 0
+		return m, nil
+
+	case tasksRefreshedMsg:
+		m.tasks = msg.tasks
+		if m.cursor >= len(m.tasks) {
+			m.cursor = len(m.tasks) - 1
+		}
+		if m.cursor < 0 {
+			m.cursor = 0
+		}
+		m.loadGraphForSelected()
+		return m, nil
+
 	case tea.KeyMsg:
+		// When operation is done, any key returns to normal view.
+		if m.running && m.runDone {
+			m.running = false
+			m.runDone = false
+			m.runErr = nil
+			m.logLines = nil
+			m.logScroll = 0
+			m.runTitle = ""
+			// Refresh tasks from store.
+			return m, m.refreshTasksCmd()
+		}
+
+		// While operation is running, only allow quit and scroll.
+		if m.running {
+			switch msg.String() {
+			case "q", "ctrl+c":
+				return m, tea.Quit
+			case "up", "k":
+				if m.logScroll < len(m.logLines)-1 {
+					m.logScroll++
+				}
+			case "down", "j":
+				if m.logScroll > 0 {
+					m.logScroll--
+				}
+			}
+			return m, nil
+		}
+
 		if m.inputMode {
 			switch msg.String() {
 			case "enter":
@@ -170,36 +288,26 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.inputBuf = ""
 		case "a":
 			if m.cursor < len(m.tasks) && m.tasks[m.cursor].State == fsm.Plan {
-				m.action = TUIApprove
-				m.selectedID = m.tasks[m.cursor].ID
-				return m, tea.Quit
+				return m, m.startOperation(TUIApprove, m.tasks[m.cursor].ID)
 			}
 		case "r":
 			if m.cursor < len(m.tasks) {
 				switch m.tasks[m.cursor].State {
 				case fsm.Plan:
-					m.action = TUIReplan
-					m.selectedID = m.tasks[m.cursor].ID
-					return m, tea.Quit
+					return m, m.startOperation(TUIReplan, m.tasks[m.cursor].ID)
 				case fsm.LocalReview:
-					m.action = TUIRework
-					m.selectedID = m.tasks[m.cursor].ID
-					return m, tea.Quit
+					return m, m.startOperation(TUIRework, m.tasks[m.cursor].ID)
 				}
 			}
 		case "p":
 			if m.cursor < len(m.tasks) && m.tasks[m.cursor].State == fsm.LocalReview {
-				m.action = TUIPush
-				m.selectedID = m.tasks[m.cursor].ID
-				return m, tea.Quit
+				return m, m.startOperation(TUIPush, m.tasks[m.cursor].ID)
 			}
 		case "R":
 			if m.cursor < len(m.tasks) {
 				s := m.tasks[m.cursor].State
 				if s == fsm.AIReview || s == fsm.AIFix || s == fsm.Code {
-					m.action = TUIResume
-					m.selectedID = m.tasks[m.cursor].ID
-					return m, tea.Quit
+					return m, m.startOperation(TUIResume, m.tasks[m.cursor].ID)
 				}
 			}
 		case "up", "k":
@@ -231,6 +339,66 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m *tuiModel) startOperation(action TUIAction, taskID string) tea.Cmd {
+	m.running = true
+	m.runDone = false
+	m.runErr = nil
+	m.logLines = nil
+	m.logScroll = 0
+	m.selectedID = taskID
+	m.action = action
+
+	actionName := ""
+	switch action {
+	case TUIApprove:
+		actionName = "approve"
+	case TUIReplan:
+		actionName = "replan"
+	case TUIRework:
+		actionName = "rework"
+	case TUIPush:
+		actionName = "push"
+	case TUIResume:
+		actionName = "resume"
+	}
+	m.runTitle = fmt.Sprintf("%s %s", actionName, taskID)
+
+	configPath := m.configPath
+	noJira := m.noJira
+
+	return func() tea.Msg {
+		restore := captureOutputs(m.program)
+		defer restore()
+
+		var err error
+		switch action {
+		case TUIApprove:
+			err = cmdApprove(configPath, taskID, noJira)
+		case TUIReplan:
+			err = cmdReplan(configPath, taskID, "", noJira)
+		case TUIRework:
+			err = cmdRework(configPath, taskID, "", noJira)
+		case TUIPush:
+			err = cmdPush(configPath, taskID, noJira)
+		case TUIResume:
+			err = cmdResume(configPath, taskID, noJira)
+		}
+
+		return operationDoneMsg{err: err}
+	}
+}
+
+func (m tuiModel) refreshTasksCmd() tea.Cmd {
+	store := m.store
+	return func() tea.Msg {
+		tasks, err := store.List()
+		if err != nil {
+			return tasksRefreshedMsg{tasks: nil}
+		}
+		return tasksRefreshedMsg{tasks: tasks}
+	}
+}
+
 func (m *tuiModel) loadGraphForSelected() {
 	m.graph = nil
 	if m.cursor >= len(m.tasks) {
@@ -252,7 +420,7 @@ func (m *tuiModel) loadGraphForSelected() {
 }
 
 func (m tuiModel) View() string {
-	if len(m.tasks) == 0 {
+	if len(m.tasks) == 0 && !m.running {
 		return m.renderEmpty()
 	}
 
@@ -261,6 +429,12 @@ func (m tuiModel) View() string {
 	bodyHeight := m.height - lipgloss.Height(header) - lipgloss.Height(footer)
 	if bodyHeight < 1 {
 		bodyHeight = 1
+	}
+
+	if m.running {
+		// Show task list (read-only) on left, log panel on right.
+		body := m.renderRunningLayout(bodyHeight)
+		return lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
 	}
 
 	var body string
@@ -308,6 +482,36 @@ func (m tuiModel) renderHeader() string {
 func (m tuiModel) renderFooter() string {
 	if m.inputMode {
 		return m.renderInputBar()
+	}
+
+	if m.running {
+		var keys []struct{ key, label string }
+		if m.runDone {
+			keys = []struct{ key, label string }{
+				{"any key", "back"},
+				{"q", "quit"},
+			}
+		} else {
+			keys = []struct{ key, label string }{
+				{"↑↓", "scroll"},
+				{"q", "quit"},
+			}
+		}
+		pillStyle := lipgloss.NewStyle().
+			Background(colSurface).
+			Foreground(colText).
+			Padding(0, 1)
+		labelStyle := lipgloss.NewStyle().
+			Foreground(colMuted)
+		var parts []string
+		for _, k := range keys {
+			pill := pillStyle.Render(k.key) + " " + labelStyle.Render(k.label)
+			parts = append(parts, pill)
+		}
+		return lipgloss.NewStyle().
+			Background(colBg).
+			Width(m.width).
+			Render(strings.Join(parts, "  "))
 	}
 
 	keys := []struct{ key, label string }{
@@ -817,6 +1021,108 @@ func (m tuiModel) renderDetail(width, height int) string {
 		rows = append(rows, "")
 		rows = append(rows, labelStyle.Render("reviews"))
 		rows = append(rows, "  "+valueStyle.Render(fmt.Sprintf("%d / %d", t.ReviewIteration, t.MaxReviewIterations)))
+	}
+
+	content := strings.Join(rows, "\n")
+
+	return lipgloss.NewStyle().
+		Width(width).
+		Height(height).
+		Background(colBg).
+		Padding(0, 1).
+		Render(content)
+}
+
+// ---------------------------------------------------------------------------
+// Log panel (shown during operations)
+// ---------------------------------------------------------------------------
+
+func (m tuiModel) renderRunningLayout(height int) string {
+	if m.layout == layoutSinglePane {
+		return m.renderLogPanel(m.width, height)
+	}
+
+	leftWidth := 24
+	rightWidth := m.width - leftWidth - 1
+	if rightWidth < 20 {
+		rightWidth = 20
+	}
+
+	left := m.renderTaskList(leftWidth, height)
+	right := m.renderLogPanel(rightWidth, height)
+
+	divider := lipgloss.NewStyle().
+		Background(colBorder).
+		Width(1).
+		Height(height).
+		Render(" ")
+
+	return lipgloss.JoinHorizontal(lipgloss.Top, left, divider, right)
+}
+
+func (m tuiModel) renderLogPanel(width, height int) string {
+	titleStyle := lipgloss.NewStyle().
+		Foreground(colMuted).
+		Bold(true)
+
+	// Header with spinner or done indicator.
+	var statusIcon string
+	if m.runDone {
+		if m.runErr != nil {
+			statusIcon = lipgloss.NewStyle().Foreground(colRed).Render("x ")
+		} else {
+			statusIcon = lipgloss.NewStyle().Foreground(colGreen).Render("~ ")
+		}
+	} else {
+		statusIcon = lipgloss.NewStyle().Foreground(colCyan).Render("> ")
+	}
+
+	header := statusIcon + titleStyle.Render("Running: "+m.runTitle)
+
+	// Calculate visible log area.
+	logHeight := height - 2 // header + blank line
+	if logHeight < 1 {
+		logHeight = 1
+	}
+
+	// Determine visible window of lines (auto-scroll to bottom).
+	totalLines := len(m.logLines)
+	startLine := totalLines - logHeight - m.logScroll
+	if startLine < 0 {
+		startLine = 0
+	}
+	endLine := startLine + logHeight
+	if endLine > totalLines {
+		endLine = totalLines
+	}
+
+	var rows []string
+	rows = append(rows, header)
+	rows = append(rows, "")
+
+	lineStyle := lipgloss.NewStyle().Foreground(colText)
+	doneStyle := lipgloss.NewStyle().Foreground(colGreen).Bold(true)
+	errStyle := lipgloss.NewStyle().Foreground(colRed).Bold(true)
+
+	for i := startLine; i < endLine; i++ {
+		line := m.logLines[i]
+		// Truncate long lines to panel width.
+		if len(line) > width-2 {
+			line = line[:width-5] + "..."
+		}
+		if line == "[done]" {
+			rows = append(rows, doneStyle.Render(line))
+		} else if strings.HasPrefix(line, "[error:") {
+			rows = append(rows, errStyle.Render(line))
+		} else {
+			rows = append(rows, lineStyle.Render(line))
+		}
+	}
+
+	// If operation is done, add prompt.
+	if m.runDone && endLine >= totalLines {
+		rows = append(rows, "")
+		rows = append(rows, lipgloss.NewStyle().Foreground(colMuted).Render("Press any key to continue..."))
 	}
 
 	content := strings.Join(rows, "\n")
