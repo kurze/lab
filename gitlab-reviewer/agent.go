@@ -174,10 +174,11 @@ Tools (paths relative to root):
 
 Process:
 1. EXPLORE: read the full diff. Use grep/read_file to trace how changes across commits interact — shared state, call chains, data flow.
-2. Call the fork tool with these three tasks:
-   - id:"cross-bugs", prompt:"Hunt for changes in one commit that break assumptions in another, inconsistent error handling across the branch. Trace shared state and call chains."
-   - id:"architecture", prompt:"Hunt for API surface changes, dependency issues, migration concerns, backwards compatibility problems."
-   - id:"patterns", prompt:"Hunt for repeated anti-patterns, missing tests for new code paths, inconsistent naming or conventions across the branch."
+2. Call the fork tool with these four tasks (same categories, but focus on cross-commit interactions):
+   - id:"bugs", prompt:"Hunt for logic errors that emerge from cross-commit interactions: shared state broken by different commits, inconsistent error handling, assumptions in one commit violated by another."
+   - id:"security", prompt:"Hunt for security issues spanning multiple commits: auth gaps, input validation missing on new paths, secrets exposure, unsafe data flow across changed boundaries."
+   - id:"perf", prompt:"Hunt for performance issues at branch scale: redundant work across commits, new hot paths without caching, unbounded growth introduced by combined changes."
+   - id:"style", prompt:"Hunt for branch-wide consistency: repeated anti-patterns, inconsistent naming or conventions, missing tests for new code paths, dead code left behind."
 
 Output: plain text. For each finding: file:line, severity (info/minor/major/critical), what you found, short evidence quote. If no new issues, say "No cross-cutting issues found."
 
