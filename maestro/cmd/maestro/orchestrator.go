@@ -609,6 +609,38 @@ func cmdRebase(configPath, id string) error {
 	return nil
 }
 
+func cmdPushWithBranch(configPath, id, newBranch string, noJira bool) error {
+	_, store, _, err := loadConfigAndStore(configPath)
+	if err != nil {
+		return err
+	}
+
+	t, err := store.Resolve(id)
+	if err != nil {
+		return err
+	}
+
+	if t.WorktreePath == nil || t.BranchName == nil {
+		return fmt.Errorf("task %s has no worktree or branch", t.ID)
+	}
+
+	// Rename branch if different.
+	if newBranch != *t.BranchName {
+		fmt.Printf("Renaming branch %s → %s\n", *t.BranchName, newBranch)
+		rename := exec.Command("git", "branch", "-m", newBranch)
+		rename.Dir = *t.WorktreePath
+		if out, err := rename.CombinedOutput(); err != nil {
+			return fmt.Errorf("git branch -m: %w\n%s", err, out)
+		}
+		t.BranchName = &newBranch
+		if err := store.Save(t); err != nil {
+			return err
+		}
+	}
+
+	return cmdPush(configPath, id, noJira)
+}
+
 // cmdPush pushes the branch and prints the MR URL.
 func cmdPush(configPath, id string, noJira bool) error {
 	cfg, store, _, err := loadConfigAndStore(configPath)

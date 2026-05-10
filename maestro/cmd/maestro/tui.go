@@ -152,8 +152,10 @@ type tuiModel struct {
 	singleTab int           // 0=list, 1=dag, 2=detail (single-pane mode)
 	action     TUIAction
 	selectedID string // task ID for approve/replan/push/rework
-	inputMode  bool   // true when typing a new task title
-	inputBuf   string // title being typed
+	inputMode  bool   // true when typing input
+	inputBuf   string // text being typed
+	inputLabel string // prompt label (e.g. "new task:" or "branch:")
+	inputAction TUIAction // what to do on enter
 
 	// Live log panel state.
 	running   bool     // true while an operation is executing
@@ -265,12 +267,22 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch msg.String() {
 			case "enter":
 				if m.inputBuf != "" {
-					m.action = TUINewTask
-					return m, tea.Quit
+					action := m.inputAction
+					buf := m.inputBuf
+					m.inputMode = false
+					m.inputBuf = ""
+					m.inputLabel = ""
+					switch action {
+					case TUINewTask:
+						return m, m.startOperation(TUINewTask, buf)
+					case TUIPush:
+						return m, m.startPushWithBranch(m.selectedID, buf)
+					}
 				}
 			case "esc":
 				m.inputMode = false
 				m.inputBuf = ""
+				m.inputLabel = ""
 			case "backspace":
 				if len(m.inputBuf) > 0 {
 					m.inputBuf = m.inputBuf[:len(m.inputBuf)-1]
@@ -289,6 +301,8 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "n":
 			m.inputMode = true
 			m.inputBuf = ""
+			m.inputLabel = "new task"
+			m.inputAction = TUINewTask
 		case "a":
 			if m.cursor < len(m.tasks) && m.tasks[m.cursor].State == fsm.Plan {
 				return m, m.startOperation(TUIApprove, m.tasks[m.cursor].ID)
@@ -304,7 +318,14 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "p":
 			if m.cursor < len(m.tasks) && m.tasks[m.cursor].State == fsm.LocalReview {
-				return m, m.startOperation(TUIPush, m.tasks[m.cursor].ID)
+				t := m.tasks[m.cursor]
+				m.inputMode = true
+				m.inputLabel = "branch"
+				m.inputAction = TUIPush
+				m.selectedID = t.ID
+				if t.BranchName != nil {
+					m.inputBuf = *t.BranchName
+				}
 			}
 		case "b":
 			if m.cursor < len(m.tasks) && m.tasks[m.cursor].State == fsm.LocalReview {
@@ -357,6 +378,8 @@ func (m *tuiModel) startOperation(action TUIAction, taskID string) tea.Cmd {
 
 	actionName := ""
 	switch action {
+	case TUINewTask:
+		actionName = "new"
 	case TUIApprove:
 		actionName = "approve"
 	case TUIReplan:
@@ -374,6 +397,7 @@ func (m *tuiModel) startOperation(action TUIAction, taskID string) tea.Cmd {
 
 	configPath := m.configPath
 	noJira := m.noJira
+	agentType := m.agentType
 	progRef := m.programRef
 
 	return func() tea.Msg {
@@ -382,6 +406,8 @@ func (m *tuiModel) startOperation(action TUIAction, taskID string) tea.Cmd {
 
 		var err error
 		switch action {
+		case TUINewTask:
+			err = cmdNew(configPath, taskID, "", noJira, agentType)
 		case TUIApprove:
 			err = cmdApprove(configPath, taskID, noJira)
 		case TUIReplan:
@@ -396,6 +422,27 @@ func (m *tuiModel) startOperation(action TUIAction, taskID string) tea.Cmd {
 			err = cmdRebase(configPath, taskID)
 		}
 
+		return operationDoneMsg{err: err}
+	}
+}
+
+func (m *tuiModel) startPushWithBranch(taskID, newBranch string) tea.Cmd {
+	m.running = true
+	m.runDone = false
+	m.runErr = nil
+	m.logLines = nil
+	m.logScroll = 0
+	m.runTitle = fmt.Sprintf("push %s → %s", taskID, newBranch)
+
+	configPath := m.configPath
+	noJira := m.noJira
+	progRef := m.programRef
+
+	return func() tea.Msg {
+		restore := captureOutputs(*progRef)
+		defer restore()
+
+		err := cmdPushWithBranch(configPath, taskID, newBranch, noJira)
 		return operationDoneMsg{err: err}
 	}
 }
@@ -582,7 +629,7 @@ func (m tuiModel) renderInputBar() string {
 	label := lipgloss.NewStyle().
 		Foreground(colPurple).
 		Bold(true).
-		Render("new task: ")
+		Render(m.inputLabel + ": ")
 
 	cursor := lipgloss.NewStyle().
 		Background(colText).
