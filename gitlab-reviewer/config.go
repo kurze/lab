@@ -15,6 +15,7 @@ type LLMConfig struct {
 	ContextSize  int     `toml:"context_size"`
 	TokenCeiling int     `toml:"token_ceiling"`
 	Temperature  float64 `toml:"temperature"`
+	Concurrency  int     `toml:"concurrency"`
 }
 
 type Config struct {
@@ -26,6 +27,7 @@ type Config struct {
 	ReviewAgent   string    `toml:"review_agent"`
 	RepoPath      string    `toml:"repo_path"`
 	ReviewMode    string    `toml:"review_mode"`
+	Concurrency   int       `toml:"concurrency"`
 	LLM           LLMConfig `toml:"llm"`
 	CommentStyle   string   `toml:"comment_style"`
 	InlineSeverity string   `toml:"inline_severity"`
@@ -34,11 +36,13 @@ type Config struct {
 
 func loadConfig(path string) Config {
 	cfg := Config{
-		RepoPath: ".",
+		RepoPath:    ".",
+		Concurrency: 1,
 		LLM: LLMConfig{
 			ContextSize:  200_000,
 			TokenCeiling: 150_000,
 			Temperature:  0.3,
+			Concurrency:  1,
 		},
 	}
 
@@ -80,6 +84,19 @@ func loadConfig(path string) Config {
 	}
 
 	return cfg
+}
+
+func (c Config) CommitConcurrency() int {
+	var n int
+	if c.ReviewCommand != "" {
+		n = c.Concurrency
+	} else {
+		n = c.LLM.Concurrency
+	}
+	if n <= 0 {
+		return 1
+	}
+	return n
 }
 
 func (c Config) Validate() error {
