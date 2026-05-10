@@ -35,6 +35,14 @@ func RunCode(ctx context.Context, a agent.Agent, worktree string, taskDir string
 		return fmt.Errorf("topological sort: %w", err)
 	}
 
+	total := len(sorted)
+	done := 0
+	for _, t := range sorted {
+		if t.Status == planner.StatusDone {
+			done++
+		}
+	}
+
 	for _, task := range sorted {
 		if task.Status == planner.StatusDone {
 			continue
@@ -42,6 +50,9 @@ func RunCode(ctx context.Context, a agent.Agent, worktree string, taskDir string
 		if task.Status == planner.StatusFailed {
 			task.Status = planner.StatusPending
 		}
+
+		done++
+		fmt.Printf("[%d/%d] %s — %s\n", done, total, task.ID, task.Title)
 
 		setTaskStatus(g, task.ID, planner.StatusInProgress)
 		if err := saveGraph(taskDir, g); err != nil {
@@ -57,7 +68,6 @@ func RunCode(ctx context.Context, a agent.Agent, worktree string, taskDir string
 			return fmt.Errorf("sub-task %s (%s) failed: %w", task.ID, task.Title, err)
 		}
 
-		// Commit all changes produced by the agent.
 		if err := gitCommit(ctx, worktree, task.Title); err != nil {
 			setTaskStatus(g, task.ID, planner.StatusFailed)
 			_ = saveGraph(taskDir, g)
@@ -68,6 +78,8 @@ func RunCode(ctx context.Context, a agent.Agent, worktree string, taskDir string
 		if err := saveGraph(taskDir, g); err != nil {
 			return fmt.Errorf("save plan (done): %w", err)
 		}
+
+		fmt.Printf("[%d/%d] %s done ✓\n", done, total, task.ID)
 	}
 
 	return nil
