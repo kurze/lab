@@ -83,11 +83,13 @@ func Load(path string) (Config, error) {
 }
 
 func (c Config) Validate() error {
-	if c.Jira.BaseURL == "" {
-		return fmt.Errorf("jira.base_url is required")
-	}
-	if c.Jira.ProjectKey == "" {
-		return fmt.Errorf("jira.project_key is required")
+	if c.Jira.BaseURL != "" || c.Jira.Email != "" || c.Jira.APITokenEnv != "" {
+		if c.Jira.BaseURL == "" {
+			return fmt.Errorf("jira.base_url is required when jira is configured")
+		}
+		if c.Jira.ProjectKey == "" {
+			return fmt.Errorf("jira.project_key is required when jira is configured")
+		}
 	}
 	if !hasAnyAgent(c.Agents) {
 		return fmt.Errorf("at least one agent config is required")
