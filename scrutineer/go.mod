@@ -1,4 +1,4 @@
-module github.com/kurze/lab/gitlab-reviewer
+module github.com/kurze/lab/scrutineer
 
 go 1.26.3
 

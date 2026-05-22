@@ -16,7 +16,7 @@ type State struct {
 
 func defaultStatePath() string {
 	if home, err := os.UserHomeDir(); err == nil {
-		return filepath.Join(home, ".config", "gitlab-reviewer", "state.json")
+		return filepath.Join(home, ".config", "scrutineer", "state.json")
 	}
 	return "state.json"
 }

@@ -11,7 +11,7 @@ import (
 var severityOrder = []string{"critical", "major", "minor", "info"}
 
 func formatFooter(model string) string {
-	footer := "*Automated review by [gitlab-reviewer](https://github.com/kurze/lab/tree/main/gitlab-reviewer)"
+	footer := "*Automated review by [scrutineer](https://github.com/kurze/lab/tree/main/scrutineer)"
 	if model != "" {
 		footer += fmt.Sprintf(" · agent: %s", model)
 	}

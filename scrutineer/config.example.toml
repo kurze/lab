@@ -1,6 +1,6 @@
-# gitlab-reviewer configuration
+# scrutineer configuration
 #
-# Place this file at ~/.config/gitlab-reviewer/config.toml
+# Place this file at ~/.config/scrutineer/config.toml
 
 # Forge type: "gitlab" or "github" (auto-detected from git remote if omitted)
 # forge = "gitlab"

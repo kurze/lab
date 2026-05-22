@@ -48,7 +48,7 @@ func loadConfig(path string) Config {
 
 	if path == "" {
 		if home, err := os.UserHomeDir(); err == nil {
-			path = filepath.Join(home, ".config", "gitlab-reviewer", "config.toml")
+			path = filepath.Join(home, ".config", "scrutineer", "config.toml")
 		}
 	}
 

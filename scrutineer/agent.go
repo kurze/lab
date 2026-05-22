@@ -9,7 +9,7 @@ import (
 	"github.com/kurze/lab/agentcore"
 )
 
-const agentName = "gitlab-reviewer"
+const agentName = "scrutineer"
 
 type LLMReviewer struct {
 	LLM          *agentcore.LLMClient

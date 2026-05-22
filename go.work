@@ -3,7 +3,7 @@ go 1.26.3
 use (
 	./agentcore
 	./fast-chat/go
-	./gitlab-reviewer
+	./scrutineer
 	./maestro
 	./review-agent
 )

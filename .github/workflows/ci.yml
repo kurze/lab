@@ -68,19 +68,20 @@ jobs:
       - run: go test ./...
       - run: go vet ./...
 
-  gitlab-reviewer:
-    name: gitlab-reviewer
+  scrutineer:
+    name: scrutineer
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: gitlab-reviewer
+        working-directory: scrutineer
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version: stable
-          cache-dependency-path: gitlab-reviewer/go.sum
+          cache-dependency-path: scrutineer/go.sum
       - run: go build ./...
+      - run: go test ./...
       - run: go vet ./...
 
   maestro:
