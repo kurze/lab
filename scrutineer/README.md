@@ -70,9 +70,11 @@ scrutineer post --mr 42 --comments inline  # inline comments only
 
 ## Configuration
 
-Config file location: `~/.config/scrutineer/config.toml`
+Config is loaded in layers, each overriding the previous:
 
-Override with `--config path/to/config.toml`.
+1. **Global**: `~/.config/scrutineer/config.toml`
+2. **Local**: `./config.toml` in the working directory (or `--config path/to/file.toml`)
+3. **Environment variables** (see below)
 
 ```toml
 # Forge type: "gitlab" or "github" (auto-detected from git remote if omitted)

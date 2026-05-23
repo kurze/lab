@@ -49,14 +49,17 @@ func loadConfig(path string) Config {
 	if home, err := os.UserHomeDir(); err == nil {
 		globalPath := filepath.Join(home, ".config", "scrutineer", "config.toml")
 		if _, err := toml.DecodeFile(globalPath, &cfg); err != nil && !os.IsNotExist(err) {
-			log.Printf("warning: config %s: %v", globalPath, err)
+			log.Printf("warning: global config %s: %v", globalPath, err)
 		}
+	} else {
+		log.Printf("warning: cannot determine home directory, skipping global config: %v", err)
 	}
 
-	if path != "" {
-		if _, err := toml.DecodeFile(path, &cfg); err != nil && !os.IsNotExist(err) {
-			log.Printf("warning: config %s: %v", path, err)
-		}
+	if path == "" {
+		path = "config.toml"
+	}
+	if _, err := toml.DecodeFile(path, &cfg); err != nil && !os.IsNotExist(err) {
+		log.Printf("warning: config %s: %v", path, err)
 	}
 
 	if v := os.Getenv("FORGE_URL"); v != "" {
