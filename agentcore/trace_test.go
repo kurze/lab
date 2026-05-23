@@ -89,12 +89,19 @@ func TestTracerMetaOnlyOnFirstSystemEntry(t *testing.T) {
 	tr.Log(TraceEntry{Iteration: 1, Role: "system", Content: "nudge"})
 	tr.Close()
 
-	data, _ := os.ReadFile(tr.Path())
+	data, err := os.ReadFile(tr.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
 	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
 
 	var first, second traceEntryWithMeta
-	json.Unmarshal([]byte(lines[0]), &first)
-	json.Unmarshal([]byte(lines[1]), &second)
+	if err := json.Unmarshal([]byte(lines[0]), &first); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(lines[1]), &second); err != nil {
+		t.Fatal(err)
+	}
 
 	if first.Meta == nil || first.Meta["key"] != "val" {
 		t.Error("first system entry should have meta")

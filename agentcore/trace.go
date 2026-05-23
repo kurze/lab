@@ -23,9 +23,10 @@ type TraceEntry struct {
 }
 
 type Tracer struct {
-	f    *os.File
-	meta map[string]string
-	path string
+	f        *os.File
+	meta     map[string]string
+	path     string
+	metaSent bool
 }
 
 func NewTracer(agentName, tag string) (*Tracer, error) {
@@ -65,7 +66,10 @@ func (t *Tracer) Path() string { return t.path }
 func TracesDir(agentName string) string {
 	stateDir := os.Getenv("XDG_STATE_HOME")
 	if stateDir == "" {
-		home, _ := os.UserHomeDir()
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return ""
+		}
 		stateDir = filepath.Join(home, ".local", "state")
 	}
 	return filepath.Join(stateDir, agentName, "traces")
@@ -79,8 +83,9 @@ type traceEntryWithMeta struct {
 func (t *Tracer) Log(entry TraceEntry) {
 	entry.Timestamp = time.Now()
 	em := traceEntryWithMeta{TraceEntry: entry}
-	if entry.Iteration == 0 && entry.Role == "system" && len(t.meta) > 0 {
+	if !t.metaSent && entry.Role == "system" && len(t.meta) > 0 {
 		em.Meta = t.meta
+		t.metaSent = true
 	}
 	data, err := json.Marshal(em)
 	if err != nil {
