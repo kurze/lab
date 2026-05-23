@@ -71,7 +71,9 @@ func formatCommitResultsBody(b *strings.Builder, commitResults []CommitReviewRes
 
 func formatFinding(b *strings.Builder, f Finding) {
 	fmt.Fprintf(b, "- **%s**", f.Category)
-	if f.Location != "" {
+	if f.CommitSHA != "" && f.Location != "" {
+		fmt.Fprintf(b, " `[%s] %s`", f.CommitSHA, f.Location)
+	} else if f.Location != "" {
 		fmt.Fprintf(b, " `%s`", f.Location)
 	}
 	fmt.Fprintf(b, " — %s", f.Description)

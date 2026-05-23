@@ -124,6 +124,18 @@ func (g *GitHubClient) PostInlineComments(ctx context.Context, pr PullRequest, c
 	return err
 }
 
+func (g *GitHubClient) PostCommitComment(ctx context.Context, sha string, file string, line int, body string) error {
+	comment := &github.RepositoryComment{
+		Body: &body,
+	}
+	if file != "" && line > 0 {
+		comment.Path = &file
+		comment.Position = &line
+	}
+	_, _, err := g.client.Repositories.CreateComment(ctx, g.owner, g.repo, sha, comment)
+	return err
+}
+
 func splitOwnerRepo(project string) (string, string, error) {
 	parts := strings.SplitN(project, "/", 2)
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {

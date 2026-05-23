@@ -42,6 +42,7 @@ type Forge interface {
 	ListCommits(ctx context.Context, id int64) ([]Commit, error)
 	PostComment(ctx context.Context, id int64, body string) error
 	PostInlineComments(ctx context.Context, pr PullRequest, comments []InlineComment) error
+	PostCommitComment(ctx context.Context, sha string, file string, line int, body string) error
 }
 
 func DetectForge(repoPath string) string {
