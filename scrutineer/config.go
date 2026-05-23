@@ -46,9 +46,10 @@ func loadConfig(path string) Config {
 		},
 	}
 
-	if path == "" {
-		if home, err := os.UserHomeDir(); err == nil {
-			path = filepath.Join(home, ".config", "scrutineer", "config.toml")
+	if home, err := os.UserHomeDir(); err == nil {
+		globalPath := filepath.Join(home, ".config", "scrutineer", "config.toml")
+		if _, err := toml.DecodeFile(globalPath, &cfg); err != nil && !os.IsNotExist(err) {
+			log.Printf("warning: config %s: %v", globalPath, err)
 		}
 	}
 
