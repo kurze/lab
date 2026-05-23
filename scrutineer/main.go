@@ -7,21 +7,138 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"time"
 
 	"github.com/kurze/lab/agentcore"
 )
 
+func usage() {
+	fmt.Fprintf(os.Stderr, `Usage: scrutineer <command> [flags]
+
+Commands:
+  review    Review merge/pull requests or local branches
+  list      List merge/pull requests and their review status
+
+Run 'scrutineer <command> -h' for command-specific help.
+`)
+	os.Exit(1)
+}
+
 func main() {
-	project := flag.String("project", "", "project path (owner/repo)")
-	mrIID := flag.Int64("mr", 0, "review a single merge/pull request by number")
-	post := flag.Bool("post", false, "post findings as comments (default: dry-run)")
-	configPath := flag.String("config", "", "path to config file")
-	repoPath := flag.String("repo", "", "path to local repo clone")
-	batch := flag.Bool("batch", false, "batch mode: review all unreviewed MRs")
-	mode := flag.String("mode", "", "review mode: full, commits, or both")
-	comments := flag.String("comments", "", "comment style: summary, inline, or both")
-	branch := flag.String("branch", "", "review a local branch (commits since base branch)")
-	flag.Parse()
+	if len(os.Args) < 2 {
+		usage()
+	}
+
+	switch os.Args[1] {
+	case "list":
+		cmdList(os.Args[2:])
+	case "review":
+		cmdReview(os.Args[2:])
+	case "-h", "--help", "help":
+		usage()
+	default:
+		fmt.Fprintf(os.Stderr, "unknown command: %s\n\n", os.Args[1])
+		usage()
+	}
+}
+
+func cmdList(args []string) {
+	fs := flag.NewFlagSet("list", flag.ExitOnError)
+	project := fs.String("project", "", "project path (owner/repo)")
+	configPath := fs.String("config", "", "path to config file")
+	repoPath := fs.String("repo", "", "path to local repo clone")
+	filterFlag := fs.String("filter", "all", "filter: all, unreviewed, reviewed")
+	fs.Parse(args)
+
+	cfg := loadConfig(*configPath)
+	if *project != "" {
+		cfg.Project = *project
+	}
+	if *repoPath != "" {
+		cfg.RepoPath = *repoPath
+	}
+
+	if err := cfg.ValidateForge(); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+
+	state, err := LoadState("")
+	if err != nil {
+		log.Fatalf("state: %v", err)
+	}
+
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer cancel()
+
+	forge, err := NewForge(cfg)
+	if err != nil {
+		log.Fatalf("forge: %v", err)
+	}
+
+	prs, err := forge.ListAll(ctx)
+	if err != nil {
+		log.Fatalf("list: %v", err)
+	}
+
+	for _, pr := range prs {
+		reviewed := state.IsReviewed(cfg.Project, pr.ID)
+
+		switch *filterFlag {
+		case "unreviewed":
+			if reviewed {
+				continue
+			}
+		case "reviewed":
+			if !reviewed {
+				continue
+			}
+		case "all":
+		default:
+			fmt.Fprintf(os.Stderr, "error: invalid filter %q (valid: all, unreviewed, reviewed)\n", *filterFlag)
+			os.Exit(1)
+		}
+
+		status := "  "
+		if reviewed {
+			status = "R "
+		}
+
+		age := formatAge(pr.UpdatedAt)
+
+		fmt.Printf("%s#%-6d %-15s %-6s %s\n", status, pr.ID, pr.Author, age, pr.Title)
+	}
+}
+
+func formatAge(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	d := time.Since(t)
+	switch {
+	case d < time.Minute:
+		return "now"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%dd", int(d.Hours()/24))
+	}
+}
+
+func cmdReview(args []string) {
+	fs := flag.NewFlagSet("review", flag.ExitOnError)
+	project := fs.String("project", "", "project path (owner/repo)")
+	mrIID := fs.Int64("mr", 0, "review a single merge/pull request by number")
+	post := fs.Bool("post", false, "post findings as comments (default: dry-run)")
+	configPath := fs.String("config", "", "path to config file")
+	repoPath := fs.String("repo", "", "path to local repo clone")
+	batch := fs.Bool("batch", false, "batch mode: review all unreviewed MRs")
+	mode := fs.String("mode", "", "review mode: full, commits, or both")
+	comments := fs.String("comments", "", "comment style: summary, inline, or both")
+	branch := fs.String("branch", "", "review a local branch (commits since base branch)")
+	fs.Parse(args)
 
 	cfg := loadConfig(*configPath)
 	if *project != "" {
@@ -70,9 +187,8 @@ func main() {
 		return
 	}
 
-	fmt.Fprintf(os.Stderr, "Usage: scrutineer [flags]\n\n")
-	fmt.Fprintf(os.Stderr, "Flags:\n")
-	flag.PrintDefaults()
+	fmt.Fprintf(os.Stderr, "Usage: scrutineer review [flags]\n\nFlags:\n")
+	fs.PrintDefaults()
 	os.Exit(1)
 }
 
