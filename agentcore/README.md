@@ -1,6 +1,6 @@
 # agentcore
 
-Shared library for building LLM-powered agents with tool use. Used by `review-agent` and `gitlab-reviewer`.
+Shared library for building LLM-powered agents with tool use. Used by `review-agent` and `scrutineer`.
 
 ## What it provides
 
