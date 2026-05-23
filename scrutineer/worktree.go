@@ -38,9 +38,7 @@ func cleanupStaleWorktree(ctx context.Context, absRepo, branchName string) {
 
 	delCmd := exec.CommandContext(ctx, "git", "branch", "-D", branchName)
 	delCmd.Dir = absRepo
-	if out, err := delCmd.CombinedOutput(); err != nil {
-		log.Printf("warning: delete stale branch %s: %v\n%s", branchName, err, out)
-	}
+	delCmd.CombinedOutput()
 }
 
 func fetchRef(forgeName string, id int64, branchName string) string {

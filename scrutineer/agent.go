@@ -75,15 +75,16 @@ func (r *LLMReviewer) review(ctx context.Context, workDir string, diff string, f
 
 	reviewText := lr.FinalMessage.Content
 	if lr.Truncated || reviewText == "" {
-		return &ReviewResult{Findings: []Finding{}, Model: r.Model}, nil
+		return &ReviewResult{Findings: []Finding{}, Model: r.Model, TokensUsed: lr.TokensUsed}, nil
 	}
 
 	result, err := r.extractFindings(ctx, reviewText)
 	if err != nil {
 		log.Printf("warning: extraction failed, returning empty findings: %v", err)
-		return &ReviewResult{Findings: []Finding{}, Model: r.Model}, nil
+		return &ReviewResult{Findings: []Finding{}, Model: r.Model, TokensUsed: lr.TokensUsed}, nil
 	}
 	result.Model = r.Model
+	result.TokensUsed = lr.TokensUsed
 	return result, nil
 }
 
@@ -121,15 +122,16 @@ func (r *LLMReviewer) ReviewWithContext(ctx context.Context, workDir string, dif
 
 	reviewText := lr.FinalMessage.Content
 	if lr.Truncated || reviewText == "" {
-		return &ReviewResult{Findings: []Finding{}, Model: r.Model}, nil
+		return &ReviewResult{Findings: []Finding{}, Model: r.Model, TokensUsed: lr.TokensUsed}, nil
 	}
 
 	result, err := r.extractFindings(ctx, reviewText)
 	if err != nil {
 		log.Printf("warning: extraction failed, returning empty findings: %v", err)
-		return &ReviewResult{Findings: []Finding{}, Model: r.Model}, nil
+		return &ReviewResult{Findings: []Finding{}, Model: r.Model, TokensUsed: lr.TokensUsed}, nil
 	}
 	result.Model = r.Model
+	result.TokensUsed = lr.TokensUsed
 	return result, nil
 }
 

@@ -269,7 +269,7 @@ func cmdPost(args []string) {
 
 		pr, err := forge.Get(ctx, id)
 		if err != nil {
-			log.Printf("skip %s: get PR: %v", key, err)
+			warnf("skip %s: get PR: %v", key, err)
 			continue
 		}
 
@@ -283,20 +283,20 @@ func cmdPost(args []string) {
 			inlineComments, _ := routeFindings(result.Findings, cfg.InlineSeverity)
 			if len(inlineComments) > 0 {
 				if err := forge.PostInlineComments(ctx, pr, inlineComments); err != nil {
-					log.Printf("#%d: inline comments failed: %v", id, err)
+					errf("#%d: inline comments failed: %v", id, err)
 				} else {
-					log.Printf("#%d: posted %d inline comment(s)", id, len(inlineComments))
+					logf("%s posted %s inline comment(s)", cl(ansiBold, fmt.Sprintf("#%d", id)), cl(ansiGreen, fmt.Sprintf("%d", len(inlineComments))))
 				}
 			}
 		}
 		if postSummary {
 			if err := forge.PostComment(ctx, id, comment); err != nil {
-				log.Printf("skip #%d: post comment: %v", id, err)
+				errf("skip #%d: post comment: %v", id, err)
 				continue
 			}
 		}
 
-		log.Printf("posted #%d: %d finding(s)", id, len(result.Findings))
+		logf("%s %s %d finding(s)", cl(ansiBold, fmt.Sprintf("#%d", id)), cl(ansiGreen, "✓"), len(result.Findings))
 	}
 }
 
@@ -411,11 +411,11 @@ func runBranch(ctx context.Context, cfg Config, state *State, branchName string)
 		return fmt.Errorf("list branch commits: %w", err)
 	}
 	if len(commits) == 0 {
-		log.Printf("no commits found on %s since %s", branchName, baseBranch)
+		logf("no commits found on %s since %s", branchName, baseBranch)
 		return nil
 	}
 
-	log.Printf("branch %s: %d commit(s) since %s", branchName, len(commits), baseBranch)
+	logf("branch %s: %d commit(s) since %s", cl(ansiBold, branchName), len(commits), baseBranch)
 
 	mode := cfg.ReviewMode
 	if mode == "" {
@@ -495,7 +495,7 @@ func runBranch(ctx context.Context, cfg Config, state *State, branchName string)
 		ReviewedAt: time.Now(),
 	})
 	if err := state.Save(); err != nil {
-		log.Printf("warning: save state: %v", err)
+		warnf("save state: %v", err)
 	}
 
 	fmt.Printf("--- %s (%d finding(s)) ---\n%s\n", branchName, len(result.Findings), comment)
@@ -519,13 +519,13 @@ func runBranch(ctx context.Context, cfg Config, state *State, branchName string)
 					}
 					body := formatInlineBody(f)
 					if err := forge.PostCommitComment(ctx, sha, file, line, body); err != nil {
-						log.Printf("commit comment on %s %s:%d failed: %v", f.CommitSHA, file, line, err)
+						warnf("commit comment on %s %s:%d failed: %v", f.CommitSHA, file, line, err)
 					} else {
 						posted++
 					}
 				}
 				if posted > 0 {
-					log.Printf("posted %d commit comment(s) on branch %s", posted, branchName)
+					logf("posted %d commit comment(s) on branch %s", posted, branchName)
 				}
 			}
 		}
@@ -546,7 +546,7 @@ func runCommit(ctx context.Context, cfg Config, state *State, sha string) error 
 		return fmt.Errorf("git show %s: %w", sha, err)
 	}
 	if strings.TrimSpace(diff) == "" {
-		log.Printf("commit %s has no diff", sha)
+		logf("commit %s has no diff", sha)
 		return nil
 	}
 
@@ -555,7 +555,7 @@ func runCommit(ctx context.Context, cfg Config, state *State, sha string) error 
 		shortSHA = shortSHA[:8]
 	}
 
-	fmt.Fprintf(os.Stderr, "reviewing commit %s...\n", shortSHA)
+	logf("reviewing commit %s...", cl(ansiBold, shortSHA))
 
 	taggedDiff := fmt.Sprintf("Commit: %s\n\n%s", shortSHA, diff)
 	result, err := reviewer.Review(ctx, cfg.RepoPath, taggedDiff)
@@ -572,7 +572,7 @@ func runCommit(ctx context.Context, cfg Config, state *State, sha string) error 
 		ReviewedAt: time.Now(),
 	})
 	if err := state.Save(); err != nil {
-		log.Printf("warning: save state: %v", err)
+		warnf("save state: %v", err)
 	}
 
 	comment := FormatComment(result, fmt.Sprintf("commit %s", shortSHA))
@@ -586,10 +586,10 @@ func runCommit(ctx context.Context, cfg Config, state *State, sha string) error 
 		inlineComments, _ := routeFindings(result.Findings, cfg.InlineSeverity)
 		for _, ic := range inlineComments {
 			if err := forge.PostCommitComment(ctx, sha, ic.File, ic.Line, ic.Body); err != nil {
-				log.Printf("commit comment on %s:%d failed: %v", ic.File, ic.Line, err)
+				warnf("commit comment on %s:%d failed: %v", ic.File, ic.Line, err)
 			}
 		}
-		log.Printf("posted %d commit comment(s) on %s", len(inlineComments), shortSHA)
+		logf("posted %d commit comment(s) on %s", len(inlineComments), shortSHA)
 	}
 
 	return nil
@@ -606,13 +606,18 @@ func findFullSHA(commits []Commit, short string) string {
 
 func cliProgress(prefix string) ProgressFunc {
 	return func(ev CommitProgressEvent) {
+		p := prefix
+		if p != "" {
+			p = cl(ansiBold, p) + " "
+		}
+		sha := cl(ansiDim, ev.SHA)
 		switch ev.Status {
 		case CommitStarted:
-			fmt.Fprintf(os.Stderr, "%s  ⟳ commit %d/%d: %s %s\n", prefix, ev.Index, ev.Total, ev.SHA, ev.Message)
+			logf("%s %s commit %d/%d: %s %s", p, cl(ansiCyan, "⟳"), ev.Index, ev.Total, sha, ev.Message)
 		case CommitDone:
-			fmt.Fprintf(os.Stderr, "%s  ✓ commit %d/%d: %s %s\n", prefix, ev.Index, ev.Total, ev.SHA, ev.Message)
+			logf("%s %s commit %d/%d: %s %s", p, cl(ansiGreen, "✓"), ev.Index, ev.Total, sha, ev.Message)
 		case CommitFailed:
-			fmt.Fprintf(os.Stderr, "%s  ✗ commit %d/%d: %s %s — %v\n", prefix, ev.Index, ev.Total, ev.SHA, ev.Message, ev.Err)
+			logf("%s %s commit %d/%d: %s %s — %v", p, cl(ansiRed, "✗"), ev.Index, ev.Total, sha, ev.Message, ev.Err)
 		}
 	}
 }
@@ -687,13 +692,71 @@ func parseMRIDs(s string) ([]int64, error) {
 	return ids, nil
 }
 
+type mrSummary struct {
+	ID       int64
+	Title    string
+	Findings int
+	Posted   int
+	Tokens   int
+	Duration time.Duration
+	Status   string
+}
+
+func formatTokens(n int) string {
+	if n <= 0 {
+		return "-"
+	}
+	if n >= 1_000_000 {
+		return fmt.Sprintf("%.1fM", float64(n)/1_000_000)
+	}
+	if n >= 1_000 {
+		return fmt.Sprintf("%.1fk", float64(n)/1_000)
+	}
+	return fmt.Sprintf("%d", n)
+}
+
+func printSummaryTable(summaries []mrSummary, totalDuration time.Duration) {
+	fmt.Fprintf(os.Stderr, "\n%s\n", cl(ansiBold, "Summary"))
+	fmt.Fprintf(os.Stderr, "%s\n", cl(ansiDim, strings.Repeat("─", 72)))
+	fmt.Fprintf(os.Stderr, "%-8s %-9s %-8s %-9s %-10s %s\n",
+		cl(ansiDim, "MR"), cl(ansiDim, "Findings"), cl(ansiDim, "Posted"),
+		cl(ansiDim, "Tokens"), cl(ansiDim, "Duration"), cl(ansiDim, "Status"))
+	fmt.Fprintf(os.Stderr, "%s\n", cl(ansiDim, strings.Repeat("─", 72)))
+
+	totalTokens := 0
+	for _, s := range summaries {
+		totalTokens += s.Tokens
+		id := fmt.Sprintf("#%-6d", s.ID)
+		findings := fmt.Sprintf("%-9d", s.Findings)
+		posted := fmt.Sprintf("%-8d", s.Posted)
+		tokens := fmt.Sprintf("%-9s", formatTokens(s.Tokens))
+		dur := fmt.Sprintf("%-10s", s.Duration.Round(time.Second))
+
+		var status string
+		switch s.Status {
+		case "ok":
+			status = cl(ansiGreen, "✓")
+		case "dry-run":
+			status = cl(ansiCyan, "● dry-run")
+		default:
+			status = cl(ansiRed, "✗ "+s.Status)
+		}
+
+		fmt.Fprintf(os.Stderr, "%s %s %s %s %s %s\n", id, findings, posted, tokens, dur, status)
+	}
+
+	fmt.Fprintf(os.Stderr, "%s\n", cl(ansiDim, strings.Repeat("─", 72)))
+	fmt.Fprintf(os.Stderr, "Total: %d MR(s), %s tokens, %s\n",
+		len(summaries), formatTokens(totalTokens), totalDuration.Round(time.Second))
+}
+
 func run(ctx context.Context, cfg Config, state *State, targets []MRTarget) error {
 	forge, err := NewForge(cfg)
 	if err != nil {
 		return fmt.Errorf("%s forge client: %w", cfg.ForgeType, err)
 	}
 
-	log.Printf("using %s forge", forge.Name())
+	logf("using %s forge", cl(ansiBold, forge.Name()))
 	reviewer := newReviewer(cfg)
 
 	type prWithMode struct {
@@ -723,11 +786,14 @@ func run(ctx context.Context, cfg Config, state *State, targets []MRTarget) erro
 	}
 
 	if len(prs) == 0 {
-		log.Println("no unreviewed merge/pull requests found")
+		logf("no unreviewed merge/pull requests found")
 		return nil
 	}
 
-	log.Printf("reviewing %d request(s)", len(prs))
+	logf("reviewing %s request(s)", cl(ansiBold, fmt.Sprintf("%d", len(prs))))
+
+	runStart := time.Now()
+	var summaries []mrSummary
 
 	for _, pwm := range prs {
 		select {
@@ -742,7 +808,8 @@ func run(ctx context.Context, cfg Config, state *State, targets []MRTarget) erro
 			reviewMode = cfg.ReviewMode
 		}
 
-		log.Printf("reviewing #%d: %s (mode: %s)", pr.ID, pr.Title, reviewMode)
+		mrStart := time.Now()
+		logf("reviewing %s: %s %s", cl(ansiBold, fmt.Sprintf("#%d", pr.ID)), pr.Title, cl(ansiDim, "(mode: "+reviewMode+")"))
 
 		setReviewerMeta(reviewer, map[string]string{
 			"mr_id":   fmt.Sprintf("%d", pr.ID),
@@ -752,7 +819,7 @@ func run(ctx context.Context, cfg Config, state *State, targets []MRTarget) erro
 
 		worktreeDir, cleanup, err := CreateWorktree(ctx, cfg.RepoPath, pr.ID, forge.Name())
 		if err != nil {
-			log.Printf("skip #%d: worktree: %v", pr.ID, err)
+			warnf("skip #%d: worktree: %v", pr.ID, err)
 			continue
 		}
 
@@ -764,13 +831,13 @@ func run(ctx context.Context, cfg Config, state *State, targets []MRTarget) erro
 			commits, err := forge.ListCommits(ctx, pr.ID)
 			if err != nil {
 				cleanup()
-				log.Printf("skip #%d: list commits: %v", pr.ID, err)
+				warnf("skip #%d: list commits: %v", pr.ID, err)
 				continue
 			}
 			commitResults, err := reviewByCommits(ctx, reviewer, worktreeDir, commits, &ReviewByCommitsOpts{State: state, Project: cfg.Project, OnProgress: cliProgress(fmt.Sprintf("#%d", pr.ID)), Concurrency: cfg.CommitConcurrency()})
 			if err != nil {
 				cleanup()
-				log.Printf("skip #%d: commit review: %v", pr.ID, err)
+				warnf("skip #%d: commit review: %v", pr.ID, err)
 				continue
 			}
 
@@ -778,31 +845,32 @@ func run(ctx context.Context, cfg Config, state *State, targets []MRTarget) erro
 			if llmr, ok := reviewer.(*LLMReviewer); ok {
 				digest, err = digestFindings(ctx, llmr.LLM, llmr.Model, commitResults)
 				if err != nil {
-					log.Printf("#%d: digest failed, using plain fallback: %v", pr.ID, err)
+					warnf("#%d: digest failed, using plain fallback: %v", pr.ID, err)
 					digest = digestFindingsPlain(commitResults)
 				}
 			} else {
 				digest = digestFindingsPlain(commitResults)
 			}
-			log.Printf("#%d: digest complete, starting branch repass", pr.ID)
+			logf("%s digest complete, starting branch repass", cl(ansiBold, fmt.Sprintf("#%d", pr.ID)))
 
 			diff, err := forge.GetDiff(ctx, pr.ID)
 			if err != nil {
 				cleanup()
-				log.Printf("skip #%d: get diff: %v", pr.ID, err)
+				warnf("skip #%d: get diff: %v", pr.ID, err)
 				continue
 			}
 			branchResult, err := reviewer.ReviewWithContext(ctx, worktreeDir, diff, digest)
 			cleanup()
 			if err != nil {
-				log.Printf("skip #%d: branch repass: %v", pr.ID, err)
+				warnf("skip #%d: branch repass: %v", pr.ID, err)
 				continue
 			}
 
 			merged := mergeCommitResults(commitResults)
 			result = &ReviewResult{
-				Findings: append(merged.Findings, branchResult.Findings...),
-				Model:    merged.Model,
+				Findings:   append(merged.Findings, branchResult.Findings...),
+				Model:      merged.Model,
+				TokensUsed: merged.TokensUsed + branchResult.TokensUsed,
 			}
 			comment = FormatBothReviewComment(commitResults, branchResult, pr.Title, merged.Model)
 
@@ -810,13 +878,13 @@ func run(ctx context.Context, cfg Config, state *State, targets []MRTarget) erro
 			commits, err := forge.ListCommits(ctx, pr.ID)
 			if err != nil {
 				cleanup()
-				log.Printf("skip #%d: list commits: %v", pr.ID, err)
+				warnf("skip #%d: list commits: %v", pr.ID, err)
 				continue
 			}
 			commitResults, err := reviewByCommits(ctx, reviewer, worktreeDir, commits, &ReviewByCommitsOpts{State: state, Project: cfg.Project, OnProgress: cliProgress(fmt.Sprintf("#%d", pr.ID)), Concurrency: cfg.CommitConcurrency()})
 			cleanup()
 			if err != nil {
-				log.Printf("skip #%d: review: %v", pr.ID, err)
+				warnf("skip #%d: review: %v", pr.ID, err)
 				continue
 			}
 			result = mergeCommitResults(commitResults)
@@ -826,14 +894,14 @@ func run(ctx context.Context, cfg Config, state *State, targets []MRTarget) erro
 			diff, err := forge.GetDiff(ctx, pr.ID)
 			if err != nil {
 				cleanup()
-				log.Printf("skip #%d: get diff: %v", pr.ID, err)
+				warnf("skip #%d: get diff: %v", pr.ID, err)
 				continue
 			}
-			fmt.Fprintf(os.Stderr, "#%d  reviewing full diff...\n", pr.ID)
+			logf("%s %s reviewing full diff...", cl(ansiBold, fmt.Sprintf("#%d", pr.ID)), cl(ansiCyan, "⟳"))
 			result, err = reviewer.ReviewFull(ctx, worktreeDir, diff)
 			cleanup()
 			if err != nil {
-				log.Printf("skip #%d: review: %v", pr.ID, err)
+				warnf("skip #%d: review: %v", pr.ID, err)
 				continue
 			}
 			comment = FormatComment(result, pr.Title)
@@ -846,6 +914,14 @@ func run(ctx context.Context, cfg Config, state *State, targets []MRTarget) erro
 
 		postInline := (style == "inline" || style == "both") && len(result.Findings) > 0
 		postSummary := style == "summary" || style == "both"
+
+		s := mrSummary{
+			ID:       pr.ID,
+			Title:    pr.Title,
+			Findings: len(result.Findings),
+			Tokens:   result.TokensUsed,
+			Duration: time.Since(mrStart),
+		}
 
 		if cfg.DryRun {
 			fmt.Printf("--- #%d: %s ---\n", pr.ID, pr.Title)
@@ -868,22 +944,33 @@ func run(ctx context.Context, cfg Config, state *State, targets []MRTarget) erro
 				fmt.Printf("SUMMARY:\n%s", comment)
 			}
 			fmt.Println()
+			s.Status = "dry-run"
 		} else {
+			posted := 0
 			if postInline {
 				inlineComments, _ := routeFindings(result.Findings, cfg.InlineSeverity)
 				if len(inlineComments) > 0 {
 					if err := forge.PostInlineComments(ctx, pr, inlineComments); err != nil {
-						log.Printf("#%d: inline comments failed: %v", pr.ID, err)
+						errf("#%d: inline comments failed: %v", pr.ID, err)
+						s.Status = "inline failed"
 					} else {
-						log.Printf("#%d: posted %d inline comment(s)", pr.ID, len(inlineComments))
+						posted = len(inlineComments)
+						logf("%s posted %s inline comment(s)", cl(ansiBold, fmt.Sprintf("#%d", pr.ID)), cl(ansiGreen, fmt.Sprintf("%d", posted)))
 					}
 				}
 			}
 			if postSummary {
 				if err := forge.PostComment(ctx, pr.ID, comment); err != nil {
-					log.Printf("skip #%d: post comment: %v", pr.ID, err)
+					errf("skip #%d: post comment: %v", pr.ID, err)
+					s.Status = "post failed"
+					s.Posted = posted
+					summaries = append(summaries, s)
 					continue
 				}
+			}
+			s.Posted = posted
+			if s.Status == "" {
+				s.Status = "ok"
 			}
 		}
 
@@ -897,10 +984,19 @@ func run(ctx context.Context, cfg Config, state *State, targets []MRTarget) erro
 		})
 		state.MarkReviewed(cfg.Project, pr.ID)
 		if err := state.Save(); err != nil {
-			log.Printf("warning: save state: %v", err)
+			warnf("save state: %v", err)
 		}
 
-		log.Printf("reviewed #%d: %d finding(s)", pr.ID, len(result.Findings))
+		logf("%s %s %s finding(s) %s",
+			cl(ansiBold, fmt.Sprintf("#%d", pr.ID)),
+			cl(ansiGreen, "✓"),
+			cl(ansiBold, fmt.Sprintf("%d", len(result.Findings))),
+			cl(ansiDim, fmt.Sprintf("(%s, %s tokens)", s.Duration.Round(time.Second), formatTokens(result.TokensUsed))))
+		summaries = append(summaries, s)
+	}
+
+	if len(summaries) > 0 {
+		printSummaryTable(summaries, time.Since(runStart))
 	}
 
 	return nil
