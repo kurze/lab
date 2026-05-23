@@ -83,6 +83,19 @@ func loadConfig(path string) Config {
 		cfg.ReviewMode = v
 	}
 
+	if cfg.ForgeType == "" || cfg.ForgeURL == "" || cfg.Project == "" {
+		info := DetectRemote(cfg.RepoPath)
+		if cfg.ForgeType == "" && info.ForgeType != "" {
+			cfg.ForgeType = info.ForgeType
+		}
+		if cfg.ForgeURL == "" && info.BaseURL != "" {
+			cfg.ForgeURL = info.BaseURL
+		}
+		if cfg.Project == "" && info.Project != "" {
+			cfg.Project = info.Project
+		}
+	}
+
 	return cfg
 }
 

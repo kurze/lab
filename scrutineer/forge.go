@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os/exec"
 	"strings"
 	"time"
@@ -45,19 +46,77 @@ type Forge interface {
 	PostCommitComment(ctx context.Context, sha string, file string, line int, body string) error
 }
 
+type RemoteInfo struct {
+	ForgeType string
+	BaseURL   string
+	Project   string
+}
+
 func DetectForge(repoPath string) string {
+	info := DetectRemote(repoPath)
+	return info.ForgeType
+}
+
+func DetectRemote(repoPath string) RemoteInfo {
 	cmd := exec.Command("git", "remote", "get-url", "origin")
 	cmd.Dir = repoPath
 	out, err := cmd.Output()
 	if err != nil {
-		return ""
+		return RemoteInfo{}
 	}
-	url := strings.TrimSpace(string(out))
+	return ParseRemoteURL(strings.TrimSpace(string(out)))
+}
 
-	if strings.Contains(url, "github.com") {
-		return "github"
+func ParseRemoteURL(raw string) RemoteInfo {
+	var host, path, scheme string
+
+	if strings.Contains(raw, "://") {
+		u, err := url.Parse(raw)
+		if err != nil {
+			return RemoteInfo{}
+		}
+		scheme = u.Scheme
+		host = u.Hostname()
+		path = strings.TrimPrefix(u.Path, "/")
+	} else if strings.Contains(raw, ":") {
+		// SCP-style: git@host:owner/repo.git
+		at := strings.Index(raw, "@")
+		if at < 0 {
+			return RemoteInfo{}
+		}
+		rest := raw[at+1:]
+		colon := strings.Index(rest, ":")
+		if colon < 0 {
+			return RemoteInfo{}
+		}
+		host = rest[:colon]
+		path = rest[colon+1:]
+		scheme = "https"
+	} else {
+		return RemoteInfo{}
 	}
-	return "gitlab"
+
+	if host == "" {
+		return RemoteInfo{}
+	}
+
+	path = strings.TrimSuffix(path, "/")
+	path = strings.TrimSuffix(path, ".git")
+
+	if scheme != "http" {
+		scheme = "https"
+	}
+
+	forgeType := "gitlab"
+	if strings.Contains(host, "github") {
+		forgeType = "github"
+	}
+
+	return RemoteInfo{
+		ForgeType: forgeType,
+		BaseURL:   scheme + "://" + host,
+		Project:   path,
+	}
 }
 
 func firstline(s string) string {
