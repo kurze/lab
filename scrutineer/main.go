@@ -22,6 +22,7 @@ Commands:
   list      List merge/pull requests and their review status
   show      Display stored review findings
   post      Post stored review findings to the forge
+  logs      List and inspect LLM trace logs
 
 Run 'scrutineer <command> -h' for command-specific help.
 `)
@@ -42,6 +43,8 @@ func main() {
 		cmdShow(os.Args[2:])
 	case "post":
 		cmdPost(os.Args[2:])
+	case "logs":
+		cmdLogs(os.Args[2:])
 	case "-h", "--help", "help":
 		usage()
 	default:
