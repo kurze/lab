@@ -72,28 +72,25 @@ func cmdLogs(args []string) {
 }
 
 func resolveTraceFile(target string) (*traceFile, error) {
-	// Try as 1-based index into recent files
-	if idx := 0; true {
-		if _, err := fmt.Sscanf(target, "%d", &idx); err == nil && idx > 0 {
-			files, err := listTraceFiles()
-			if err != nil {
-				return nil, err
-			}
-			if idx > len(files) {
-				return nil, fmt.Errorf("index %d out of range (have %d files)", idx, len(files))
-			}
-			return &files[idx-1], nil
+	var idx int
+	if _, err := fmt.Sscanf(target, "%d", &idx); err == nil && idx > 0 {
+		files, err := listTraceFiles()
+		if err != nil {
+			return nil, err
 		}
+		if idx > len(files) {
+			return nil, fmt.Errorf("index %d out of range (have %d files)", idx, len(files))
+		}
+		return &files[idx-1], nil
 	}
 
-	// Try as filename or partial match
 	files, err := listTraceFiles()
 	if err != nil {
 		return nil, err
 	}
-	for _, f := range files {
-		if f.Name == target || strings.Contains(f.Name, target) {
-			return &f, nil
+	for i := range files {
+		if files[i].Name == target || strings.Contains(files[i].Name, target) {
+			return &files[i], nil
 		}
 	}
 
@@ -169,15 +166,23 @@ type traceSummary struct {
 	CompletionTokens int
 	TotalLatencyMs   int64
 	Duration         time.Duration
+	rawData          []byte
 }
 
 func summarizeTrace(tf traceFile) (*traceSummary, error) {
-	data, err := os.ReadFile(tf.Path)
-	if err != nil {
-		return nil, err
+	return summarizeTraceData(tf, nil)
+}
+
+func summarizeTraceData(tf traceFile, data []byte) (*traceSummary, error) {
+	if data == nil {
+		var err error
+		data, err = os.ReadFile(tf.Path)
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	s := &traceSummary{File: tf}
+	s := &traceSummary{File: tf, rawData: data}
 	var firstTS, lastTS time.Time
 
 	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
@@ -212,10 +217,10 @@ func summarizeTrace(tf traceFile) (*traceSummary, error) {
 			s.Iterations = entry.Iteration
 		}
 
+		s.PromptTokens += entry.PromptTokens
+		s.CompletionTokens += entry.CompletionTokens
 		if entry.TotalTokens > s.TotalTokens {
 			s.TotalTokens = entry.TotalTokens
-			s.PromptTokens = entry.PromptTokens
-			s.CompletionTokens = entry.CompletionTokens
 		}
 
 		s.TotalLatencyMs += entry.LatencyMs
@@ -279,7 +284,12 @@ func printTraceList(files []traceFile, verbose bool) {
 }
 
 func printTraceShow(tf traceFile) error {
-	s, err := summarizeTrace(tf)
+	data, err := os.ReadFile(tf.Path)
+	if err != nil {
+		return err
+	}
+
+	s, err := summarizeTraceData(tf, data)
 	if err != nil {
 		return err
 	}
@@ -302,11 +312,6 @@ func printTraceShow(tf traceFile) error {
 	}
 
 	fmt.Println()
-
-	data, err := os.ReadFile(tf.Path)
-	if err != nil {
-		return err
-	}
 
 	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
 		if line == "" {
