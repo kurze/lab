@@ -7,6 +7,8 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/kurze/lab/agentcore"
@@ -130,7 +132,7 @@ func formatAge(t time.Time) string {
 func cmdReview(args []string) {
 	fs := flag.NewFlagSet("review", flag.ExitOnError)
 	project := fs.String("project", "", "project path (owner/repo)")
-	mrIID := fs.Int64("mr", 0, "review a single merge/pull request by number")
+	mrFlag := fs.String("mr", "", "merge/pull request IDs (comma-separated, e.g. 1,2,5)")
 	post := fs.Bool("post", false, "post findings as comments (default: dry-run)")
 	configPath := fs.String("config", "", "path to config file")
 	repoPath := fs.String("repo", "", "path to local repo clone")
@@ -178,10 +180,16 @@ func cmdReview(args []string) {
 		log.Fatalf("state: %v", err)
 	}
 
-	if *mrIID > 0 || *batch {
+	mrIDs, err := parseMRIDs(*mrFlag)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+
+	if len(mrIDs) > 0 || *batch {
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 		defer cancel()
-		if err := run(ctx, cfg, state, *mrIID); err != nil {
+		if err := run(ctx, cfg, state, mrIDs); err != nil {
 			log.Fatalf("error: %v", err)
 		}
 		return
@@ -298,7 +306,30 @@ func newReviewer(cfg Config) Reviewer {
 	}
 }
 
-func run(ctx context.Context, cfg Config, state *State, singleMR int64) error {
+func parseMRIDs(s string) ([]int64, error) {
+	if s == "" {
+		return nil, nil
+	}
+	parts := strings.Split(s, ",")
+	ids := make([]int64, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		id, err := strconv.ParseInt(p, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("invalid MR ID %q: %w", p, err)
+		}
+		if id <= 0 {
+			return nil, fmt.Errorf("invalid MR ID %d: must be positive", id)
+		}
+		ids = append(ids, id)
+	}
+	return ids, nil
+}
+
+func run(ctx context.Context, cfg Config, state *State, mrIDs []int64) error {
 	forge, err := NewForge(cfg)
 	if err != nil {
 		return fmt.Errorf("%s forge client: %w", cfg.ForgeType, err)
@@ -308,12 +339,14 @@ func run(ctx context.Context, cfg Config, state *State, singleMR int64) error {
 	reviewer := newReviewer(cfg)
 
 	var prs []PullRequest
-	if singleMR > 0 {
-		pr, err := forge.Get(ctx, singleMR)
-		if err != nil {
-			return fmt.Errorf("get #%d: %w", singleMR, err)
+	if len(mrIDs) > 0 {
+		for _, id := range mrIDs {
+			pr, err := forge.Get(ctx, id)
+			if err != nil {
+				return fmt.Errorf("get #%d: %w", id, err)
+			}
+			prs = append(prs, pr)
 		}
-		prs = []PullRequest{pr}
 	} else {
 		all, err := forge.ListAll(ctx)
 		if err != nil {
