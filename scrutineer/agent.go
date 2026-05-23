@@ -17,6 +17,7 @@ type LLMReviewer struct {
 	ContextSize  int
 	TokenCeiling int
 	Temperature  float64
+	TraceMeta    map[string]string
 }
 
 func (r *LLMReviewer) Review(ctx context.Context, workDir string, diff string) (*ReviewResult, error) {
@@ -59,6 +60,7 @@ func (r *LLMReviewer) review(ctx context.Context, workDir string, diff string, f
 		MaxForkDepth:   maxForkDepth,
 		AgentName:      agentName,
 		TracerTag:      tracerTag,
+		TraceMeta:      r.TraceMeta,
 		Tools:          agentcore.StandardToolDefs(),
 		ToolDispatcher: agentcore.StandardToolDispatch,
 		Messages: []agentcore.ChatMessage{
@@ -104,6 +106,7 @@ func (r *LLMReviewer) ReviewWithContext(ctx context.Context, workDir string, dif
 		MaxForkDepth:   1,
 		AgentName:      agentName,
 		TracerTag:      "mr-repass",
+		TraceMeta:      r.TraceMeta,
 		Tools:          agentcore.StandardToolDefs(),
 		ToolDispatcher: agentcore.StandardToolDispatch,
 		Messages: []agentcore.ChatMessage{
