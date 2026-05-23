@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"os/exec"
 	"strings"
 	"sync"
@@ -51,18 +50,18 @@ func reviewByCommits(ctx context.Context, reviewer Reviewer, worktreeDir string,
 	var items []workItem
 	for i, commit := range commits {
 		if opts != nil && opts.State != nil && opts.State.IsCommitReviewed(opts.Project, commit.SHA) {
-			log.Printf("  skip already reviewed commit %d/%d: %s", i+1, len(commits), commit.SHA[:8])
+			logf("  skip already reviewed commit %d/%d: %s", i+1, len(commits), cl(ansiDim, commit.SHA[:8]))
 			continue
 		}
 
 		if isMergeCommit(worktreeDir, commit.SHA) {
-			log.Printf("  skip merge commit %d/%d: %s", i+1, len(commits), commit.SHA[:8])
+			logf("  skip merge commit %d/%d: %s", i+1, len(commits), cl(ansiDim, commit.SHA[:8]))
 			continue
 		}
 
 		diff, err := commitDiff(worktreeDir, commit.SHA)
 		if err != nil {
-			log.Printf("  skip commit %d/%d %s: git show: %v", i+1, len(commits), commit.SHA[:8], err)
+			warnf("  skip commit %d/%d %s: git show: %v", i+1, len(commits), commit.SHA[:8], err)
 			continue
 		}
 		if strings.TrimSpace(diff) == "" {
@@ -117,7 +116,7 @@ func reviewByCommits(ctx context.Context, reviewer Reviewer, worktreeDir string,
 				return
 			}
 
-			log.Printf("  reviewing commit %d/%d: %s %s", wi+1, total, item.sha, item.msg)
+			logf("  reviewing commit %d/%d: %s %s", wi+1, total, cl(ansiDim, item.sha), item.msg)
 			if opts != nil && opts.OnProgress != nil {
 				opts.OnProgress(CommitProgressEvent{
 					Index:   wi + 1,
@@ -131,7 +130,7 @@ func reviewByCommits(ctx context.Context, reviewer Reviewer, worktreeDir string,
 			taggedDiff := fmt.Sprintf("Commit: %s — %s\n\n%s", item.sha, item.msg, item.diff)
 			result, err := reviewer.Review(ctx, worktreeDir, taggedDiff)
 			if err != nil {
-				log.Printf("  commit %s review failed: %v", item.sha, err)
+				errf("  commit %s review failed: %v", item.sha, err)
 				if opts != nil && opts.OnProgress != nil {
 					opts.OnProgress(CommitProgressEvent{
 						Index:   wi + 1,
@@ -222,6 +221,7 @@ func mergeCommitResults(crs []CommitReviewResult) *ReviewResult {
 		if merged.Model == "" {
 			merged.Model = cr.Result.Model
 		}
+		merged.TokensUsed += cr.Result.TokensUsed
 		sha := cr.Commit.SHA
 		if len(sha) > 8 {
 			sha = sha[:8]
