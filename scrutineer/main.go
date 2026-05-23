@@ -422,6 +422,12 @@ func runBranch(ctx context.Context, cfg Config, state *State, branchName string)
 		mode = "full"
 	}
 
+	setReviewerMeta(reviewer, map[string]string{
+		"branch":  branchName,
+		"project": cfg.Project,
+		"mode":    mode,
+	})
+
 	pr := PullRequest{
 		Title:  fmt.Sprintf("branch: %s", branchName),
 		Author: "local",
@@ -530,6 +536,10 @@ func runBranch(ctx context.Context, cfg Config, state *State, branchName string)
 
 func runCommit(ctx context.Context, cfg Config, state *State, sha string) error {
 	reviewer := newReviewer(cfg)
+	setReviewerMeta(reviewer, map[string]string{
+		"commit":  sha,
+		"project": cfg.Project,
+	})
 
 	diff, err := commitDiff(cfg.RepoPath, sha)
 	if err != nil {
@@ -617,6 +627,12 @@ func newReviewer(cfg Config) Reviewer {
 		ContextSize:  cfg.LLM.ContextSize,
 		TokenCeiling: cfg.LLM.TokenCeiling,
 		Temperature:  cfg.LLM.Temperature,
+	}
+}
+
+func setReviewerMeta(r Reviewer, meta map[string]string) {
+	if llmr, ok := r.(*LLMReviewer); ok {
+		llmr.TraceMeta = meta
 	}
 }
 
@@ -727,6 +743,12 @@ func run(ctx context.Context, cfg Config, state *State, targets []MRTarget) erro
 		}
 
 		log.Printf("reviewing #%d: %s (mode: %s)", pr.ID, pr.Title, reviewMode)
+
+		setReviewerMeta(reviewer, map[string]string{
+			"mr_id":   fmt.Sprintf("%d", pr.ID),
+			"project": cfg.Project,
+			"mode":    reviewMode,
+		})
 
 		worktreeDir, cleanup, err := CreateWorktree(ctx, cfg.RepoPath, pr.ID, forge.Name())
 		if err != nil {
