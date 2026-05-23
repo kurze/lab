@@ -48,10 +48,16 @@ func TestMergeCommitResults(t *testing.T) {
 	if len(result.Findings) != 3 {
 		t.Fatalf("expected 3 findings, got %d", len(result.Findings))
 	}
-	if result.Findings[0].Location != "[aaa11111] file.go:1" {
-		t.Errorf("unexpected location prefix: %s", result.Findings[0].Location)
+	if result.Findings[0].Location != "file.go:1" {
+		t.Errorf("expected original location, got %q", result.Findings[0].Location)
 	}
-	if result.Findings[1].Location != "[bbb22222] other.go:5" {
-		t.Errorf("unexpected location prefix: %s", result.Findings[1].Location)
+	if result.Findings[0].CommitSHA != "aaa11111" {
+		t.Errorf("expected commit SHA aaa11111, got %q", result.Findings[0].CommitSHA)
+	}
+	if result.Findings[1].Location != "other.go:5" {
+		t.Errorf("expected original location, got %q", result.Findings[1].Location)
+	}
+	if result.Findings[1].CommitSHA != "bbb22222" {
+		t.Errorf("expected commit SHA bbb22222, got %q", result.Findings[1].CommitSHA)
 	}
 }

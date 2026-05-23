@@ -227,7 +227,7 @@ func mergeCommitResults(crs []CommitReviewResult) *ReviewResult {
 			sha = sha[:8]
 		}
 		for _, f := range cr.Result.Findings {
-			f.Location = fmt.Sprintf("[%s] %s", sha, f.Location)
+			f.CommitSHA = sha
 			merged.Findings = append(merged.Findings, f)
 		}
 	}

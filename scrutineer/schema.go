@@ -6,6 +6,7 @@ type Finding struct {
 	Location    string `json:"location"`
 	Description string `json:"description"`
 	Evidence    string `json:"evidence"`
+	CommitSHA   string `json:"commit_sha,omitempty"`
 }
 
 type ReviewResult struct {

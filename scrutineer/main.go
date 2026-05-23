@@ -328,6 +328,7 @@ func cmdReview(args []string) {
 	mode := fs.String("mode", "", "review mode: full, commits, or both")
 	comments := fs.String("comments", "", "comment style: summary, inline, or both")
 	branch := fs.String("branch", "", "review a local branch (commits since base branch)")
+	commitSHA := fs.String("commit", "", "review a single commit by SHA")
 	fs.Parse(args)
 
 	cfg := loadConfig(*configPath)
@@ -358,6 +359,19 @@ func cmdReview(args []string) {
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 		defer cancel()
 		if err := runBranch(ctx, cfg, state, *branch); err != nil {
+			log.Fatalf("error: %v", err)
+		}
+		return
+	}
+
+	if *commitSHA != "" {
+		if cfg.ReviewCommand == "" && cfg.LLM.URL == "" {
+			fmt.Fprintf(os.Stderr, "error: review engine required: set review_command or [llm] url in config\n")
+			os.Exit(1)
+		}
+		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+		defer cancel()
+		if err := runCommit(ctx, cfg, state, *commitSHA); err != nil {
 			log.Fatalf("error: %v", err)
 		}
 		return
@@ -479,7 +493,105 @@ func runBranch(ctx context.Context, cfg Config, state *State, branchName string)
 	}
 
 	fmt.Printf("--- %s (%d finding(s)) ---\n%s\n", branchName, len(result.Findings), comment)
+
+	if !cfg.DryRun && len(result.Findings) > 0 {
+		if err := cfg.ValidateForge(); err == nil {
+			forge, fErr := NewForge(cfg)
+			if fErr == nil {
+				posted := 0
+				for _, f := range result.Findings {
+					if f.CommitSHA == "" {
+						continue
+					}
+					file, line, ok := parseLocation(f.Location)
+					if !ok {
+						continue
+					}
+					sha := findFullSHA(commits, f.CommitSHA)
+					if sha == "" {
+						continue
+					}
+					body := formatInlineBody(f)
+					if err := forge.PostCommitComment(ctx, sha, file, line, body); err != nil {
+						log.Printf("commit comment on %s %s:%d failed: %v", f.CommitSHA, file, line, err)
+					} else {
+						posted++
+					}
+				}
+				if posted > 0 {
+					log.Printf("posted %d commit comment(s) on branch %s", posted, branchName)
+				}
+			}
+		}
+	}
+
 	return nil
+}
+
+func runCommit(ctx context.Context, cfg Config, state *State, sha string) error {
+	reviewer := newReviewer(cfg)
+
+	diff, err := commitDiff(cfg.RepoPath, sha)
+	if err != nil {
+		return fmt.Errorf("git show %s: %w", sha, err)
+	}
+	if strings.TrimSpace(diff) == "" {
+		log.Printf("commit %s has no diff", sha)
+		return nil
+	}
+
+	shortSHA := sha
+	if len(shortSHA) > 8 {
+		shortSHA = shortSHA[:8]
+	}
+
+	fmt.Fprintf(os.Stderr, "reviewing commit %s...\n", shortSHA)
+
+	taggedDiff := fmt.Sprintf("Commit: %s\n\n%s", shortSHA, diff)
+	result, err := reviewer.Review(ctx, cfg.RepoPath, taggedDiff)
+	if err != nil {
+		return fmt.Errorf("review: %w", err)
+	}
+
+	state.StoreResult(cfg.Project, &StoredResult{
+		Key:        ResultKeyCommit(sha),
+		Title:      fmt.Sprintf("commit %s", shortSHA),
+		Mode:       "full",
+		Findings:   result.Findings,
+		Model:      result.Model,
+		ReviewedAt: time.Now(),
+	})
+	if err := state.Save(); err != nil {
+		log.Printf("warning: save state: %v", err)
+	}
+
+	comment := FormatComment(result, fmt.Sprintf("commit %s", shortSHA))
+	fmt.Printf("--- commit %s (%d finding(s)) ---\n%s\n", shortSHA, len(result.Findings), comment)
+
+	if !cfg.DryRun && len(result.Findings) > 0 {
+		forge, fErr := NewForge(cfg)
+		if fErr != nil {
+			return fmt.Errorf("forge: %w", fErr)
+		}
+		inlineComments, _ := routeFindings(result.Findings, cfg.InlineSeverity)
+		for _, ic := range inlineComments {
+			if err := forge.PostCommitComment(ctx, sha, ic.File, ic.Line, ic.Body); err != nil {
+				log.Printf("commit comment on %s:%d failed: %v", ic.File, ic.Line, err)
+			}
+		}
+		log.Printf("posted %d commit comment(s) on %s", len(inlineComments), shortSHA)
+	}
+
+	return nil
+}
+
+func findFullSHA(commits []Commit, short string) string {
+	for _, c := range commits {
+		if strings.HasPrefix(c.SHA, short) {
+			return c.SHA
+		}
+	}
+	return ""
 }
 
 func cliProgress(prefix string) ProgressFunc {

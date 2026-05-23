@@ -157,3 +157,18 @@ func (g *GitLabClient) PostInlineComments(_ context.Context, pr PullRequest, com
 	}
 	return nil
 }
+
+func (g *GitLabClient) PostCommitComment(_ context.Context, sha string, file string, line int, body string) error {
+	opts := &gitlab.PostCommitCommentOptions{
+		Note: &body,
+	}
+	if file != "" && line > 0 {
+		opts.Path = &file
+		l := int64(line)
+		opts.Line = &l
+		lineType := "new"
+		opts.LineType = &lineType
+	}
+	_, _, err := g.client.Commits.PostCommitComment(g.project, sha, opts)
+	return err
+}
