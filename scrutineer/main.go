@@ -382,16 +382,16 @@ func cmdReview(args []string) {
 		os.Exit(1)
 	}
 
-	mrIDs, err := parseMRIDs(*mrFlag)
+	targets, err := parseMRTargets(*mrFlag)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
 
-	if len(mrIDs) > 0 || *batch {
+	if len(targets) > 0 || *batch {
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 		defer cancel()
-		if err := run(ctx, cfg, state, mrIDs); err != nil {
+		if err := run(ctx, cfg, state, targets); err != nil {
 			log.Fatalf("error: %v", err)
 		}
 		return
@@ -620,30 +620,58 @@ func newReviewer(cfg Config) Reviewer {
 	}
 }
 
-func parseMRIDs(s string) ([]int64, error) {
+type MRTarget struct {
+	ID   int64
+	Mode string
+}
+
+func parseMRTargets(s string) ([]MRTarget, error) {
 	if s == "" {
 		return nil, nil
 	}
 	parts := strings.Split(s, ",")
-	ids := make([]int64, 0, len(parts))
+	targets := make([]MRTarget, 0, len(parts))
 	for _, p := range parts {
 		p = strings.TrimSpace(p)
 		if p == "" {
 			continue
 		}
-		id, err := strconv.ParseInt(p, 10, 64)
+		idStr, mode, _ := strings.Cut(p, ":")
+		id, err := strconv.ParseInt(idStr, 10, 64)
 		if err != nil {
-			return nil, fmt.Errorf("invalid MR ID %q: %w", p, err)
+			return nil, fmt.Errorf("invalid MR ID %q: %w", idStr, err)
 		}
 		if id <= 0 {
 			return nil, fmt.Errorf("invalid MR ID %d: must be positive", id)
 		}
-		ids = append(ids, id)
+		if mode != "" {
+			switch mode {
+			case "full", "commits", "both":
+			default:
+				return nil, fmt.Errorf("invalid mode %q for MR %d (valid: full, commits, both)", mode, id)
+			}
+		}
+		targets = append(targets, MRTarget{ID: id, Mode: mode})
+	}
+	return targets, nil
+}
+
+func parseMRIDs(s string) ([]int64, error) {
+	targets, err := parseMRTargets(s)
+	if err != nil {
+		return nil, err
+	}
+	if len(targets) == 0 {
+		return nil, nil
+	}
+	ids := make([]int64, len(targets))
+	for i, t := range targets {
+		ids[i] = t.ID
 	}
 	return ids, nil
 }
 
-func run(ctx context.Context, cfg Config, state *State, mrIDs []int64) error {
+func run(ctx context.Context, cfg Config, state *State, targets []MRTarget) error {
 	forge, err := NewForge(cfg)
 	if err != nil {
 		return fmt.Errorf("%s forge client: %w", cfg.ForgeType, err)
@@ -652,14 +680,19 @@ func run(ctx context.Context, cfg Config, state *State, mrIDs []int64) error {
 	log.Printf("using %s forge", forge.Name())
 	reviewer := newReviewer(cfg)
 
-	var prs []PullRequest
-	if len(mrIDs) > 0 {
-		for _, id := range mrIDs {
-			pr, err := forge.Get(ctx, id)
+	type prWithMode struct {
+		pr   PullRequest
+		mode string
+	}
+
+	var prs []prWithMode
+	if len(targets) > 0 {
+		for _, t := range targets {
+			pr, err := forge.Get(ctx, t.ID)
 			if err != nil {
-				return fmt.Errorf("get #%d: %w", id, err)
+				return fmt.Errorf("get #%d: %w", t.ID, err)
 			}
-			prs = append(prs, pr)
+			prs = append(prs, prWithMode{pr: pr, mode: t.Mode})
 		}
 	} else {
 		all, err := forge.ListAll(ctx)
@@ -668,7 +701,7 @@ func run(ctx context.Context, cfg Config, state *State, mrIDs []int64) error {
 		}
 		for _, pr := range all {
 			if !state.IsReviewed(cfg.Project, pr.ID) {
-				prs = append(prs, pr)
+				prs = append(prs, prWithMode{pr: pr})
 			}
 		}
 	}
@@ -680,14 +713,20 @@ func run(ctx context.Context, cfg Config, state *State, mrIDs []int64) error {
 
 	log.Printf("reviewing %d request(s)", len(prs))
 
-	for _, pr := range prs {
+	for _, pwm := range prs {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
 		}
 
-		log.Printf("reviewing #%d: %s", pr.ID, pr.Title)
+		pr := pwm.pr
+		reviewMode := pwm.mode
+		if reviewMode == "" {
+			reviewMode = cfg.ReviewMode
+		}
+
+		log.Printf("reviewing #%d: %s (mode: %s)", pr.ID, pr.Title, reviewMode)
 
 		worktreeDir, cleanup, err := CreateWorktree(ctx, cfg.RepoPath, pr.ID, forge.Name())
 		if err != nil {
@@ -698,7 +737,7 @@ func run(ctx context.Context, cfg Config, state *State, mrIDs []int64) error {
 		var comment string
 		var result *ReviewResult
 
-		switch cfg.ReviewMode {
+		switch reviewMode {
 		case "both":
 			commits, err := forge.ListCommits(ctx, pr.ID)
 			if err != nil {
@@ -829,7 +868,7 @@ func run(ctx context.Context, cfg Config, state *State, mrIDs []int64) error {
 		state.StoreResult(cfg.Project, &StoredResult{
 			Key:        ResultKeyMR(pr.ID),
 			Title:      pr.Title,
-			Mode:       cfg.ReviewMode,
+			Mode:       reviewMode,
 			Findings:   result.Findings,
 			Model:      result.Model,
 			ReviewedAt: time.Now(),
