@@ -4,12 +4,10 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"os"
 	"os/signal"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/kurze/lab/agentcore"
 )
 
@@ -19,7 +17,7 @@ func main() {
 	post := flag.Bool("post", false, "post findings as comments (default: dry-run)")
 	configPath := flag.String("config", "", "path to config file")
 	repoPath := flag.String("repo", "", "path to local repo clone")
-	batch := flag.Bool("batch", false, "batch mode: review all unreviewed MRs without TUI")
+	batch := flag.Bool("batch", false, "batch mode: review all unreviewed MRs")
 	mode := flag.String("mode", "", "review mode: full, commits, or both")
 	comments := flag.String("comments", "", "comment style: summary, inline, or both")
 	branch := flag.String("branch", "", "review a local branch (commits since base branch)")
@@ -72,22 +70,10 @@ func main() {
 		return
 	}
 
-	forge, err := NewForge(cfg)
-	if err != nil {
-		log.Fatalf("forge: %v", err)
-	}
-
-	m := newModel(forge, newReviewer(cfg), cfg, state)
-	var prog *tea.Program
-	m.programRef = &prog
-
-	log.SetOutput(io.Discard)
-	defer log.SetOutput(os.Stderr)
-	p := tea.NewProgram(m, tea.WithAltScreen())
-	prog = p
-	if _, err := p.Run(); err != nil {
-		log.Fatalf("tui: %v", err)
-	}
+	fmt.Fprintf(os.Stderr, "Usage: scrutineer [flags]\n\n")
+	fmt.Fprintf(os.Stderr, "Flags:\n")
+	flag.PrintDefaults()
+	os.Exit(1)
 }
 
 func runBranch(ctx context.Context, cfg Config, branchName string) error {
