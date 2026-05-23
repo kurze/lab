@@ -21,6 +21,7 @@ Commands:
   review    Review merge/pull requests or local branches
   list      List merge/pull requests and their review status
   show      Display stored review findings
+  post      Post stored review findings to the forge
 
 Run 'scrutineer <command> -h' for command-specific help.
 `)
@@ -39,6 +40,8 @@ func main() {
 		cmdReview(os.Args[2:])
 	case "show":
 		cmdShow(os.Args[2:])
+	case "post":
+		cmdPost(os.Args[2:])
 	case "-h", "--help", "help":
 		usage()
 	default:
@@ -180,6 +183,120 @@ func cmdShow(args []string) {
 			fmt.Printf("  [%s] %s%s — %s\n", f.Severity, f.Category, loc, f.Description)
 		}
 		fmt.Println()
+	}
+}
+
+func cmdPost(args []string) {
+	fs := flag.NewFlagSet("post", flag.ExitOnError)
+	project := fs.String("project", "", "project path (owner/repo)")
+	configPath := fs.String("config", "", "path to config file")
+	repoPath := fs.String("repo", "", "path to local repo clone")
+	mrFlag := fs.String("mr", "", "post results for MR ID(s) (comma-separated)")
+	all := fs.Bool("all", false, "post all stored MR results")
+	comments := fs.String("comments", "", "comment style: summary, inline, or both")
+	fs.Parse(args)
+
+	cfg := loadConfig(*configPath)
+	if *project != "" {
+		cfg.Project = *project
+	}
+	if *repoPath != "" {
+		cfg.RepoPath = *repoPath
+	}
+	if *comments != "" {
+		cfg.CommentStyle = *comments
+	}
+
+	if err := cfg.ValidateForge(); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+
+	state, err := LoadState("")
+	if err != nil {
+		log.Fatalf("state: %v", err)
+	}
+
+	var keys []string
+	if *mrFlag != "" {
+		ids, err := parseMRIDs(*mrFlag)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
+		for _, id := range ids {
+			keys = append(keys, ResultKeyMR(id))
+		}
+	} else if *all {
+		for _, r := range state.ListResults(cfg.Project) {
+			if strings.HasPrefix(r.Key, "mr:") {
+				keys = append(keys, r.Key)
+			}
+		}
+	}
+
+	if len(keys) == 0 {
+		fmt.Fprintf(os.Stderr, "nothing to post: specify --mr or --all\n")
+		os.Exit(1)
+	}
+
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer cancel()
+
+	forge, err := NewForge(cfg)
+	if err != nil {
+		log.Fatalf("forge: %v", err)
+	}
+
+	style := cfg.CommentStyle
+	if style == "" {
+		style = "both"
+	}
+
+	for _, key := range keys {
+		sr := state.GetResult(cfg.Project, key)
+		if sr == nil {
+			fmt.Fprintf(os.Stderr, "no stored result for %s\n", key)
+			continue
+		}
+
+		idStr := strings.TrimPrefix(key, "mr:")
+		id, err := strconv.ParseInt(idStr, 10, 64)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "invalid key %s\n", key)
+			continue
+		}
+
+		pr, err := forge.Get(ctx, id)
+		if err != nil {
+			log.Printf("skip %s: get PR: %v", key, err)
+			continue
+		}
+
+		result := &ReviewResult{Findings: sr.Findings, Model: sr.Model}
+		comment := FormatComment(result, pr.Title)
+
+		postInline := (style == "inline" || style == "both") && len(result.Findings) > 0
+		postSummary := style == "summary" || style == "both"
+
+		if postInline {
+			inlineComments, _ := routeFindings(result.Findings, cfg.InlineSeverity)
+			if len(inlineComments) > 0 {
+				if err := forge.PostInlineComments(ctx, pr, inlineComments); err != nil {
+					log.Printf("#%d: inline comments failed: %v", id, err)
+				} else {
+					log.Printf("#%d: posted %d inline comment(s)", id, len(inlineComments))
+				}
+			}
+		}
+		if postSummary {
+			if err := forge.PostComment(ctx, id, comment); err != nil {
+				log.Printf("skip #%d: post comment: %v", id, err)
+				continue
+			}
+		}
+
+		log.Printf("posted #%d: %d finding(s)", id, len(result.Findings))
 	}
 }
 
