@@ -99,12 +99,19 @@ func (c Config) CommitConcurrency() int {
 	return n
 }
 
-func (c Config) Validate() error {
+func (c Config) ValidateForge() error {
 	if c.Token == "" {
 		return fmt.Errorf("token required: set token in config or FORGE_TOKEN env var")
 	}
 	if c.Project == "" {
 		return fmt.Errorf("project required: set project in config or use --project flag")
+	}
+	return nil
+}
+
+func (c Config) Validate() error {
+	if err := c.ValidateForge(); err != nil {
+		return err
 	}
 	if c.ReviewCommand == "" && c.LLM.URL == "" {
 		return fmt.Errorf("review engine required: set review_command or [llm] url in config")
