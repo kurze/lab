@@ -5,12 +5,24 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 )
 
+type StoredResult struct {
+	Key       string        `json:"key"`
+	Title     string        `json:"title"`
+	Mode      string        `json:"mode"`
+	Findings  []Finding     `json:"findings"`
+	Model     string        `json:"model,omitempty"`
+	ReviewedAt time.Time    `json:"reviewed_at"`
+}
+
 type State struct {
-	Reviewed        map[string]map[string]time.Time `json:"reviewed"`
-	ReviewedCommits map[string]map[string]time.Time `json:"reviewed_commits,omitempty"`
+	Reviewed        map[string]map[string]time.Time          `json:"reviewed"`
+	ReviewedCommits map[string]map[string]time.Time          `json:"reviewed_commits,omitempty"`
+	Results         map[string]map[string]*StoredResult      `json:"results,omitempty"`
+	mu              sync.Mutex                               `json:"-"`
 	path            string
 }
 
@@ -28,6 +40,7 @@ func LoadState(path string) (*State, error) {
 	s := &State{
 		Reviewed:        make(map[string]map[string]time.Time),
 		ReviewedCommits: make(map[string]map[string]time.Time),
+		Results:         make(map[string]map[string]*StoredResult),
 		path:            path,
 	}
 	data, err := os.ReadFile(path)
@@ -61,6 +74,8 @@ func (s *State) MarkReviewed(project string, id int64) {
 }
 
 func (s *State) IsCommitReviewed(project, sha string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	proj, ok := s.ReviewedCommits[project]
 	if !ok {
 		return false
@@ -70,6 +85,8 @@ func (s *State) IsCommitReviewed(project, sha string) bool {
 }
 
 func (s *State) MarkCommitReviewed(project, sha string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.ReviewedCommits == nil {
 		s.ReviewedCommits = make(map[string]map[string]time.Time)
 	}
@@ -77,6 +94,46 @@ func (s *State) MarkCommitReviewed(project, sha string) {
 		s.ReviewedCommits[project] = make(map[string]time.Time)
 	}
 	s.ReviewedCommits[project][sha] = time.Now()
+}
+
+func ResultKeyMR(id int64) string       { return fmt.Sprintf("mr:%d", id) }
+func ResultKeyBranch(name string) string { return "branch:" + name }
+func ResultKeyCommit(sha string) string  { return "commit:" + sha }
+
+func (s *State) StoreResult(project string, sr *StoredResult) {
+	if s.Results == nil {
+		s.Results = make(map[string]map[string]*StoredResult)
+	}
+	if s.Results[project] == nil {
+		s.Results[project] = make(map[string]*StoredResult)
+	}
+	s.Results[project][sr.Key] = sr
+}
+
+func (s *State) GetResult(project, key string) *StoredResult {
+	if s.Results == nil {
+		return nil
+	}
+	proj, ok := s.Results[project]
+	if !ok {
+		return nil
+	}
+	return proj[key]
+}
+
+func (s *State) ListResults(project string) []*StoredResult {
+	if s.Results == nil {
+		return nil
+	}
+	proj, ok := s.Results[project]
+	if !ok {
+		return nil
+	}
+	results := make([]*StoredResult, 0, len(proj))
+	for _, r := range proj {
+		results = append(results, r)
+	}
+	return results
 }
 
 func (s *State) Save() error {

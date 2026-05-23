@@ -20,6 +20,7 @@ func usage() {
 Commands:
   review    Review merge/pull requests or local branches
   list      List merge/pull requests and their review status
+  show      Display stored review findings
 
 Run 'scrutineer <command> -h' for command-specific help.
 `)
@@ -36,6 +37,8 @@ func main() {
 		cmdList(os.Args[2:])
 	case "review":
 		cmdReview(os.Args[2:])
+	case "show":
+		cmdShow(os.Args[2:])
 	case "-h", "--help", "help":
 		usage()
 	default:
@@ -112,6 +115,74 @@ func cmdList(args []string) {
 	}
 }
 
+func cmdShow(args []string) {
+	fs := flag.NewFlagSet("show", flag.ExitOnError)
+	project := fs.String("project", "", "project path (owner/repo)")
+	configPath := fs.String("config", "", "path to config file")
+	mrFlag := fs.String("mr", "", "show results for MR ID(s) (comma-separated)")
+	branch := fs.String("branch", "", "show results for a branch")
+	commit := fs.String("commit", "", "show results for a commit SHA")
+	fs.Parse(args)
+
+	cfg := loadConfig(*configPath)
+	if *project != "" {
+		cfg.Project = *project
+	}
+
+	state, err := LoadState("")
+	if err != nil {
+		log.Fatalf("state: %v", err)
+	}
+
+	var keys []string
+	if *mrFlag != "" {
+		ids, err := parseMRIDs(*mrFlag)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
+		for _, id := range ids {
+			keys = append(keys, ResultKeyMR(id))
+		}
+	}
+	if *branch != "" {
+		keys = append(keys, ResultKeyBranch(*branch))
+	}
+	if *commit != "" {
+		keys = append(keys, ResultKeyCommit(*commit))
+	}
+
+	if len(keys) == 0 {
+		results := state.ListResults(cfg.Project)
+		if len(results) == 0 {
+			fmt.Println("no stored results")
+			return
+		}
+		for _, r := range results {
+			fmt.Printf("%-20s %-6s %d finding(s)  %s  %s\n",
+				r.Key, r.Mode, len(r.Findings), formatAge(r.ReviewedAt), r.Title)
+		}
+		return
+	}
+
+	for _, key := range keys {
+		r := state.GetResult(cfg.Project, key)
+		if r == nil {
+			fmt.Fprintf(os.Stderr, "no stored result for %s\n", key)
+			continue
+		}
+		fmt.Printf("--- %s: %s (%d finding(s), mode: %s) ---\n", r.Key, r.Title, len(r.Findings), r.Mode)
+		for _, f := range r.Findings {
+			loc := ""
+			if f.Location != "" {
+				loc = " " + f.Location
+			}
+			fmt.Printf("  [%s] %s%s — %s\n", f.Severity, f.Category, loc, f.Description)
+		}
+		fmt.Println()
+	}
+}
+
 func formatAge(t time.Time) string {
 	if t.IsZero() {
 		return ""
@@ -157,6 +228,11 @@ func cmdReview(args []string) {
 		cfg.CommentStyle = *comments
 	}
 
+	state, err := LoadState("")
+	if err != nil {
+		log.Fatalf("state: %v", err)
+	}
+
 	if *branch != "" {
 		if cfg.ReviewCommand == "" && cfg.LLM.URL == "" {
 			fmt.Fprintf(os.Stderr, "error: review engine required: set review_command or [llm] url in config\n")
@@ -164,7 +240,7 @@ func cmdReview(args []string) {
 		}
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 		defer cancel()
-		if err := runBranch(ctx, cfg, *branch); err != nil {
+		if err := runBranch(ctx, cfg, state, *branch); err != nil {
 			log.Fatalf("error: %v", err)
 		}
 		return
@@ -173,11 +249,6 @@ func cmdReview(args []string) {
 	if err := cfg.Validate(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
-	}
-
-	state, err := LoadState("")
-	if err != nil {
-		log.Fatalf("state: %v", err)
 	}
 
 	mrIDs, err := parseMRIDs(*mrFlag)
@@ -200,7 +271,7 @@ func cmdReview(args []string) {
 	os.Exit(1)
 }
 
-func runBranch(ctx context.Context, cfg Config, branchName string) error {
+func runBranch(ctx context.Context, cfg Config, state *State, branchName string) error {
 	baseBranch := detectBaseBranch(cfg.RepoPath)
 	reviewer := newReviewer(cfg)
 
@@ -276,6 +347,18 @@ func runBranch(ctx context.Context, cfg Config, branchName string) error {
 			return fmt.Errorf("review: %w", err)
 		}
 		comment = FormatComment(result, pr.Title)
+	}
+
+	state.StoreResult(cfg.Project, &StoredResult{
+		Key:        ResultKeyBranch(branchName),
+		Title:      pr.Title,
+		Mode:       mode,
+		Findings:   result.Findings,
+		Model:      result.Model,
+		ReviewedAt: time.Now(),
+	})
+	if err := state.Save(); err != nil {
+		log.Printf("warning: save state: %v", err)
 	}
 
 	fmt.Printf("--- %s (%d finding(s)) ---\n%s\n", branchName, len(result.Findings), comment)
@@ -514,6 +597,14 @@ func run(ctx context.Context, cfg Config, state *State, mrIDs []int64) error {
 			}
 		}
 
+		state.StoreResult(cfg.Project, &StoredResult{
+			Key:        ResultKeyMR(pr.ID),
+			Title:      pr.Title,
+			Mode:       cfg.ReviewMode,
+			Findings:   result.Findings,
+			Model:      result.Model,
+			ReviewedAt: time.Now(),
+		})
 		state.MarkReviewed(cfg.Project, pr.ID)
 		if err := state.Save(); err != nil {
 			log.Printf("warning: save state: %v", err)
