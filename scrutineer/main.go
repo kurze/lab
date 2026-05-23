@@ -230,19 +230,8 @@ func runBranch(ctx context.Context, cfg Config, branchName string) error {
 
 	switch mode {
 	case "commits", "both":
-		progress := ProgressFunc(func(ev CommitProgressEvent) {
-			sha := ev.SHA
-			switch ev.Status {
-			case CommitStarted:
-				fmt.Fprintf(os.Stderr, "  ⟳ commit %d/%d: %s %s\n", ev.Index, ev.Total, sha, ev.Message)
-			case CommitDone:
-				fmt.Fprintf(os.Stderr, "  ✓ commit %d/%d: %s %s\n", ev.Index, ev.Total, sha, ev.Message)
-			case CommitFailed:
-				fmt.Fprintf(os.Stderr, "  ✗ commit %d/%d: %s %s — %v\n", ev.Index, ev.Total, sha, ev.Message, ev.Err)
-			}
-		})
 		commitResults, err := reviewByCommits(ctx, reviewer, cfg.RepoPath, commits, &ReviewByCommitsOpts{
-			OnProgress:  progress,
+			OnProgress:  cliProgress(""),
 			Concurrency: cfg.CommitConcurrency(),
 		})
 		if err != nil {
@@ -291,6 +280,19 @@ func runBranch(ctx context.Context, cfg Config, branchName string) error {
 
 	fmt.Printf("--- %s (%d finding(s)) ---\n%s\n", branchName, len(result.Findings), comment)
 	return nil
+}
+
+func cliProgress(prefix string) ProgressFunc {
+	return func(ev CommitProgressEvent) {
+		switch ev.Status {
+		case CommitStarted:
+			fmt.Fprintf(os.Stderr, "%s  ⟳ commit %d/%d: %s %s\n", prefix, ev.Index, ev.Total, ev.SHA, ev.Message)
+		case CommitDone:
+			fmt.Fprintf(os.Stderr, "%s  ✓ commit %d/%d: %s %s\n", prefix, ev.Index, ev.Total, ev.SHA, ev.Message)
+		case CommitFailed:
+			fmt.Fprintf(os.Stderr, "%s  ✗ commit %d/%d: %s %s — %v\n", prefix, ev.Index, ev.Total, ev.SHA, ev.Message, ev.Err)
+		}
+	}
 }
 
 func newReviewer(cfg Config) Reviewer {
@@ -392,7 +394,7 @@ func run(ctx context.Context, cfg Config, state *State, mrIDs []int64) error {
 				log.Printf("skip #%d: list commits: %v", pr.ID, err)
 				continue
 			}
-			commitResults, err := reviewByCommits(ctx, reviewer, worktreeDir, commits, &ReviewByCommitsOpts{State: state, Project: cfg.Project, Concurrency: cfg.CommitConcurrency()})
+			commitResults, err := reviewByCommits(ctx, reviewer, worktreeDir, commits, &ReviewByCommitsOpts{State: state, Project: cfg.Project, OnProgress: cliProgress(fmt.Sprintf("#%d", pr.ID)), Concurrency: cfg.CommitConcurrency()})
 			if err != nil {
 				cleanup()
 				log.Printf("skip #%d: commit review: %v", pr.ID, err)
@@ -438,7 +440,7 @@ func run(ctx context.Context, cfg Config, state *State, mrIDs []int64) error {
 				log.Printf("skip #%d: list commits: %v", pr.ID, err)
 				continue
 			}
-			commitResults, err := reviewByCommits(ctx, reviewer, worktreeDir, commits, &ReviewByCommitsOpts{State: state, Project: cfg.Project, Concurrency: cfg.CommitConcurrency()})
+			commitResults, err := reviewByCommits(ctx, reviewer, worktreeDir, commits, &ReviewByCommitsOpts{State: state, Project: cfg.Project, OnProgress: cliProgress(fmt.Sprintf("#%d", pr.ID)), Concurrency: cfg.CommitConcurrency()})
 			cleanup()
 			if err != nil {
 				log.Printf("skip #%d: review: %v", pr.ID, err)
@@ -454,6 +456,7 @@ func run(ctx context.Context, cfg Config, state *State, mrIDs []int64) error {
 				log.Printf("skip #%d: get diff: %v", pr.ID, err)
 				continue
 			}
+			fmt.Fprintf(os.Stderr, "#%d  reviewing full diff...\n", pr.ID)
 			result, err = reviewer.ReviewFull(ctx, worktreeDir, diff)
 			cleanup()
 			if err != nil {
