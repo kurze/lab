@@ -34,6 +34,7 @@ type LoopConfig struct {
 	MaxForkIter    int
 	AgentName      string
 	TracerTag      string
+	TraceMeta      map[string]string
 	NudgeMessage   string
 	StuckThreshold int
 	PerIterTimeout time.Duration
@@ -90,6 +91,9 @@ func RunLoop(ctx context.Context, llm *LLMClient, cfg LoopConfig) (lr *LoopResul
 	if err != nil {
 		return nil, fmt.Errorf("init tracer: %w", err)
 	}
+	for k, v := range cfg.TraceMeta {
+		tracer.SetMeta(k, v)
+	}
 	defer func() {
 		if retErr != nil {
 			tracer.Close()
@@ -129,13 +133,16 @@ func RunLoop(ctx context.Context, llm *LLMClient, cfg LoopConfig) (lr *LoopResul
 			MaxTokens:   cfg.MaxTokens,
 		}
 
+		iterStart := time.Now()
 		resp, err := llm.Chat(iterCtx, req)
 		if err != nil && ctx.Err() == nil {
 			tracer.Log(TraceEntry{Iteration: iter, Role: "error", Content: fmt.Sprintf("retrying: %s", err)})
 			time.Sleep(2 * time.Second)
+			iterStart = time.Now()
 			resp, err = llm.Chat(iterCtx, req)
 		}
 		iterCancel()
+		iterLatency := time.Since(iterStart).Milliseconds()
 
 		if err != nil {
 			tracer.Log(TraceEntry{Iteration: iter, Role: "error", Content: err.Error()})
@@ -152,7 +159,16 @@ func RunLoop(ctx context.Context, llm *LLMClient, cfg LoopConfig) (lr *LoopResul
 
 		lastTokens = resp.Usage.TotalTokens
 		msg := resp.Choices[0].Message
-		tracer.Log(TraceEntry{Iteration: iter, Role: "assistant", Content: msg.Content, ToolCalls: msg.ToolCalls})
+		tracer.Log(TraceEntry{
+			Iteration:        iter,
+			Role:             "assistant",
+			Content:          msg.Content,
+			ToolCalls:        msg.ToolCalls,
+			PromptTokens:     resp.Usage.PromptTokens,
+			CompletionTokens: resp.Usage.CompletionTokens,
+			TotalTokens:      resp.Usage.TotalTokens,
+			LatencyMs:        iterLatency,
+		})
 
 		if len(msg.ToolCalls) == 0 || resp.Choices[0].FinishReason == "stop" {
 			if strings.TrimSpace(msg.Content) == "" && iter < cfg.MaxIter && !nudged {
@@ -318,6 +334,7 @@ func execFork(ctx context.Context, llm *LLMClient, parentCfg LoopConfig, current
 				MaxForkIter:    parentCfg.MaxForkIter,
 				AgentName:      parentCfg.AgentName,
 				TracerTag:      parentCfg.TracerTag + "-fork-" + t.ID,
+				TraceMeta:      parentCfg.TraceMeta,
 				NudgeMessage:   parentCfg.NudgeMessage,
 				StuckThreshold: parentCfg.StuckThreshold,
 				PerIterTimeout: parentCfg.PerIterTimeout,
