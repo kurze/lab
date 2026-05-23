@@ -405,11 +405,6 @@ func cmdReview(args []string) {
 func runBranch(ctx context.Context, cfg Config, state *State, branchName string) error {
 	baseBranch := detectBaseBranch(cfg.RepoPath)
 	reviewer := newReviewer(cfg)
-	setReviewerMeta(reviewer, map[string]string{
-		"branch":  branchName,
-		"project": cfg.Project,
-		"mode":    cfg.ReviewMode,
-	})
 
 	commits, err := branchCommits(cfg.RepoPath, branchName, baseBranch)
 	if err != nil {
@@ -426,6 +421,12 @@ func runBranch(ctx context.Context, cfg Config, state *State, branchName string)
 	if mode == "" {
 		mode = "full"
 	}
+
+	setReviewerMeta(reviewer, map[string]string{
+		"branch":  branchName,
+		"project": cfg.Project,
+		"mode":    mode,
+	})
 
 	pr := PullRequest{
 		Title:  fmt.Sprintf("branch: %s", branchName),
