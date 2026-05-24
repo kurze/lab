@@ -59,6 +59,32 @@ func TestFilterFixable_NoValidLocation(t *testing.T) {
 	}
 }
 
+func TestValidateFilePath(t *testing.T) {
+	tests := []struct {
+		path    string
+		wantErr bool
+	}{
+		{"main.go", false},
+		{"src/util.go", false},
+		{"../etc/passwd", true},
+		{"/etc/passwd", true},
+		{"../../foo", true},
+		{"src/../main.go", false},
+		{"src/../../escape.go", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			err := validateFilePath(tt.path)
+			if tt.wantErr && err == nil {
+				t.Errorf("expected error for path %q", tt.path)
+			}
+			if !tt.wantErr && err != nil {
+				t.Errorf("unexpected error for path %q: %v", tt.path, err)
+			}
+		})
+	}
+}
+
 func TestExtractPatch(t *testing.T) {
 	tests := []struct {
 		name    string

@@ -119,13 +119,22 @@ func applyPatch(ctx context.Context, workDir string, patch string) error {
 	return nil
 }
 
-func createFixupCommit(ctx context.Context, workDir string, finding Finding, targetSHA string) (string, error) {
-	file, _, _ := parseLocation(finding.Location)
+func validateFilePath(file string) error {
+	if filepath.IsAbs(file) {
+		return fmt.Errorf("absolute path not allowed: %s", file)
+	}
+	cleaned := filepath.Clean(file)
+	if strings.HasPrefix(cleaned, "..") {
+		return fmt.Errorf("path escapes working directory: %s", file)
+	}
+	return nil
+}
 
-	add := exec.CommandContext(ctx, "git", "add", file)
+func createFixupCommit(ctx context.Context, workDir string, finding Finding, targetSHA string) (string, error) {
+	add := exec.CommandContext(ctx, "git", "add", "-A")
 	add.Dir = workDir
 	if out, err := add.CombinedOutput(); err != nil {
-		return "", fmt.Errorf("git add %s: %w\n%s", file, err, out)
+		return "", fmt.Errorf("git add: %w\n%s", err, out)
 	}
 
 	commit := exec.CommandContext(ctx, "git", "commit", "--fixup="+targetSHA)
@@ -165,6 +174,10 @@ func rollbackFile(ctx context.Context, workDir string, file string) {
 
 func generatePatch(ctx context.Context, llm *agentcore.LLMClient, model string, workDir string, f Finding) (string, error) {
 	file, line, _ := parseLocation(f.Location)
+
+	if err := validateFilePath(file); err != nil {
+		return "", err
+	}
 
 	path := filepath.Join(workDir, file)
 	content, err := os.ReadFile(path)
