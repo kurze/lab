@@ -4,6 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"strings"
+	"sync"
+	"time"
 
 	"github.com/kurze/lab/agentcore"
 )
@@ -17,6 +21,9 @@ type LLMReviewer struct {
 	TokenCeiling int
 	Temperature  float64
 	TraceMeta    map[string]string
+	TraceDir     string
+	Verbose      bool
+	mu           sync.Mutex
 }
 
 func (r *LLMReviewer) Review(ctx context.Context, workDir string, diff string) (*ReviewResult, error) {
@@ -48,7 +55,11 @@ func (r *LLMReviewer) review(ctx context.Context, workDir string, diff string, f
 		temp = 0.3
 	}
 
-	lr, err := agentcore.RunLoop(ctx, r.LLM, agentcore.LoopConfig{
+	r.mu.Lock()
+	meta := cloneMap(r.TraceMeta)
+	r.mu.Unlock()
+
+	cfg := agentcore.LoopConfig{
 		ModelID:        r.Model,
 		ContextSize:    r.ContextSize,
 		TokenCeiling:   r.TokenCeiling,
@@ -59,14 +70,20 @@ func (r *LLMReviewer) review(ctx context.Context, workDir string, diff string, f
 		MaxForkDepth:   maxForkDepth,
 		AgentName:      agentName,
 		TracerTag:      tracerTag,
-		TraceMeta:      r.TraceMeta,
+		TraceMeta:      meta,
+		TraceDir:       r.TraceDir,
 		Tools:          agentcore.StandardToolDefs(),
 		ToolDispatcher: agentcore.StandardToolDispatch,
 		Messages: []agentcore.ChatMessage{
 			{Role: "system", Content: systemPrompt},
 			{Role: "user", Content: fmt.Sprintf("Here is the diff to review:\n\n```diff\n%s\n```\n\nReview it and produce your findings.", diff)},
 		},
-	})
+	}
+	if r.Verbose {
+		cfg.OnTrace = verboseTraceFunc()
+	}
+
+	lr, err := agentcore.RunLoop(ctx, r.LLM, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -77,7 +94,7 @@ func (r *LLMReviewer) review(ctx context.Context, workDir string, diff string, f
 		return &ReviewResult{Findings: []Finding{}, Model: r.Model, TokensUsed: lr.TokensUsed}, nil
 	}
 
-	result, err := r.extractFindings(ctx, reviewText)
+	result, err := r.extractFindings(ctx, reviewText, lr.Tracer)
 	if err != nil {
 		warnf("extraction failed, returning empty findings: %v", err)
 		return &ReviewResult{Findings: []Finding{}, Model: r.Model, TokensUsed: lr.TokensUsed}, nil
@@ -95,7 +112,11 @@ func (r *LLMReviewer) ReviewWithContext(ctx context.Context, workDir string, dif
 		temp = 0.3
 	}
 
-	lr, err := agentcore.RunLoop(ctx, r.LLM, agentcore.LoopConfig{
+	r.mu.Lock()
+	meta := cloneMap(r.TraceMeta)
+	r.mu.Unlock()
+
+	cfg := agentcore.LoopConfig{
 		ModelID:        r.Model,
 		ContextSize:    r.ContextSize,
 		TokenCeiling:   r.TokenCeiling,
@@ -106,14 +127,20 @@ func (r *LLMReviewer) ReviewWithContext(ctx context.Context, workDir string, dif
 		MaxForkDepth:   1,
 		AgentName:      agentName,
 		TracerTag:      "mr-repass",
-		TraceMeta:      r.TraceMeta,
+		TraceMeta:      meta,
+		TraceDir:       r.TraceDir,
 		Tools:          agentcore.StandardToolDefs(),
 		ToolDispatcher: agentcore.StandardToolDispatch,
 		Messages: []agentcore.ChatMessage{
 			{Role: "system", Content: systemPrompt},
 			{Role: "user", Content: fmt.Sprintf("Here is the full merge request diff to review:\n\n```diff\n%s\n```\n\nThe prior findings digest above covers what was found per-commit. Focus on cross-cutting concerns only.", diff)},
 		},
-	})
+	}
+	if r.Verbose {
+		cfg.OnTrace = verboseTraceFunc()
+	}
+
+	lr, err := agentcore.RunLoop(ctx, r.LLM, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -124,7 +151,7 @@ func (r *LLMReviewer) ReviewWithContext(ctx context.Context, workDir string, dif
 		return &ReviewResult{Findings: []Finding{}, Model: r.Model, TokensUsed: lr.TokensUsed}, nil
 	}
 
-	result, err := r.extractFindings(ctx, reviewText)
+	result, err := r.extractFindings(ctx, reviewText, lr.Tracer)
 	if err != nil {
 		warnf("extraction failed, returning empty findings: %v", err)
 		return &ReviewResult{Findings: []Finding{}, Model: r.Model, TokensUsed: lr.TokensUsed}, nil
@@ -134,7 +161,12 @@ func (r *LLMReviewer) ReviewWithContext(ctx context.Context, workDir string, dif
 	return result, nil
 }
 
-func (r *LLMReviewer) extractFindings(ctx context.Context, reviewText string) (*ReviewResult, error) {
+func (r *LLMReviewer) extractFindings(ctx context.Context, reviewText string, tracer *agentcore.Tracer) (*ReviewResult, error) {
+	if tracer != nil {
+		tracer.Log(agentcore.TraceEntry{Role: "system", Content: "[extraction] sending review text for structured finding extraction"})
+	}
+
+	start := time.Now()
 	resp, err := r.LLM.Chat(ctx, agentcore.ChatRequest{
 		Model: r.Model,
 		Messages: []agentcore.ChatMessage{
@@ -148,6 +180,17 @@ If the review found no issues, return {"findings": []}.`},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("extraction LLM call: %w", err)
+	}
+
+	if tracer != nil && len(resp.Choices) > 0 {
+		tracer.Log(agentcore.TraceEntry{
+			Role:             "assistant",
+			Content:          "[extraction] " + resp.Choices[0].Message.Content,
+			PromptTokens:     resp.Usage.PromptTokens,
+			CompletionTokens: resp.Usage.CompletionTokens,
+			TotalTokens:      resp.Usage.TotalTokens,
+			LatencyMs:        time.Since(start).Milliseconds(),
+		})
 	}
 
 	if len(resp.Choices) == 0 {
@@ -226,5 +269,58 @@ Process:
 Output: plain text. For each finding: file:line, severity (info/minor/major/critical), what you found, short evidence quote.
 
 Rules: focus on changes only, not pre-existing issues. Descriptive, not prescriptive. 1-2 sentences per finding. If a category has no findings, skip it.`, root)
+}
+
+func cloneMap(m map[string]string) map[string]string {
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
+}
+
+func verboseTraceFunc() func(agentcore.TraceEntry) {
+	return func(e agentcore.TraceEntry) {
+		content := e.Content
+		if len(content) > 120 {
+			content = content[:120] + "…"
+		}
+		content = strings.ReplaceAll(content, "\n", " ")
+
+		var tokens string
+		if e.TotalTokens > 0 {
+			tokens = fmt.Sprintf(" %s", formatTokens(e.TotalTokens))
+		}
+		var latency string
+		if e.LatencyMs > 0 {
+			latency = fmt.Sprintf(" %dms", e.LatencyMs)
+		}
+
+		fmt.Fprintf(os.Stderr, "%s [iter %d] %s: %s%s%s\n",
+			cl(ansiDim, time.Now().Format("15:04:05")),
+			e.Iteration,
+			cl(roleColor(e.Role), e.Role),
+			content,
+			cl(ansiDim, tokens),
+			cl(ansiDim, latency),
+		)
+	}
+}
+
+func roleColor(role string) string {
+	switch role {
+	case "system":
+		return ansiCyan
+	case "assistant":
+		return ansiGreen
+	case "user":
+		return ansiBlue
+	case "tool":
+		return ansiDim
+	case "error":
+		return ansiRed
+	default:
+		return ""
+	}
 }
 

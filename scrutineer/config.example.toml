@@ -50,6 +50,13 @@
 # token_ceiling = 150000
 # temperature = 0.3
 
+# Trace log directory (default: ~/.local/state/scrutineer/traces/)
+# log_dir = "/path/to/traces"          # or set SCRUTINEER_LOG_DIR env var
+
+# Trace log rotation
+# log_max_age_days = 30                # delete traces older than N days
+# log_max_size_mb = 500                # cap total trace directory size
+
 # --- Examples ---
 
 # Use Claude Code as the review agent:

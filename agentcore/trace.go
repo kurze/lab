@@ -27,6 +27,7 @@ type Tracer struct {
 	meta     map[string]string
 	path     string
 	metaSent bool
+	OnLog    func(TraceEntry)
 }
 
 func NewTracer(agentName, tag string) (*Tracer, error) {
@@ -40,6 +41,21 @@ func NewTracer(agentName, tag string) (*Tracer, error) {
 	}
 
 	dir := filepath.Join(stateDir, agentName, "traces")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, fmt.Errorf("create trace dir: %w", err)
+	}
+
+	base := strings.TrimSuffix(filepath.Base(tag), filepath.Ext(tag))
+	name := fmt.Sprintf("%s-%s.jsonl", time.Now().Format("20060102-150405"), base)
+	f, err := os.Create(filepath.Join(dir, name))
+	if err != nil {
+		return nil, fmt.Errorf("create trace file: %w", err)
+	}
+
+	return &Tracer{f: f, path: filepath.Join(dir, name)}, nil
+}
+
+func NewTracerInDir(dir, tag string) (*Tracer, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("create trace dir: %w", err)
 	}
@@ -94,6 +110,9 @@ func (t *Tracer) Log(entry TraceEntry) {
 	_, _ = t.f.Write(data)
 	_, _ = t.f.Write([]byte("\n"))
 	_ = t.f.Sync()
+	if t.OnLog != nil {
+		t.OnLog(entry)
+	}
 }
 
 func (t *Tracer) Close() {

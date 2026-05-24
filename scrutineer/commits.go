@@ -116,6 +116,15 @@ func reviewByCommits(ctx context.Context, reviewer Reviewer, worktreeDir string,
 				return
 			}
 
+			if llmr, ok := reviewer.(*LLMReviewer); ok {
+				llmr.mu.Lock()
+				if llmr.TraceMeta == nil {
+					llmr.TraceMeta = make(map[string]string)
+				}
+				llmr.TraceMeta["commit"] = item.commit.SHA
+				llmr.mu.Unlock()
+			}
+
 			logf("  reviewing commit %d/%d: %s %s", wi+1, total, cl(ansiDim, item.sha), item.msg)
 			if opts != nil && opts.OnProgress != nil {
 				opts.OnProgress(CommitProgressEvent{

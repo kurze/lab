@@ -82,15 +82,15 @@ Review local branches and individual commits outside of MR context, with optiona
 
 Capture all LLM request/response exchanges so they can be reviewed after the fact.
 
-- [ ] Log each LLM call (prompt, response, token counts, latency) to a structured file (JSONL or similar)
-- [ ] Include metadata: commit SHA, MR ID, review mode, timestamp
-- [ ] Store logs in a configurable directory (default: `~/.local/share/scrutineer/logs/`)
-- [ ] Add `logs` subcommand to list, inspect, and replay past exchanges
-  - [ ] `logs list` — show recent review sessions with date, MR, commit count
-  - [ ] `logs show <id>` — display the full prompt/response for a session
-  - [ ] `logs tail` — stream logs during a running review
-- [ ] Add `--verbose` / `--debug` flag to also print exchanges to stderr in real time
-- [ ] Rotate / prune old logs based on age or size (configurable)
+- [x] Log each LLM call (prompt, response, token counts, latency) to a structured file (JSONL or similar)
+- [x] Include metadata: commit SHA, MR ID, review mode, timestamp
+- [x] Store logs in a configurable directory (default: `~/.local/state/scrutineer/traces/`)
+- [x] Add `logs` subcommand to list, inspect, and replay past exchanges
+  - [x] `logs list` — show recent review sessions with date, MR, commit count
+  - [x] `logs show <id>` — display the full prompt/response for a session
+  - [x] `logs tail` — stream logs during a running review
+- [x] Add `--verbose` / `--debug` flag to also print exchanges to stderr in real time
+- [x] Rotate / prune old logs based on age or size (configurable)
 
 ## Phase 8: Shell completions
 
@@ -160,3 +160,5 @@ Unscoped ideas for future consideration. Not yet planned or prioritized.
 - **Forge webhook / CI integration** — listen for MR events (opened, updated) and auto-trigger reviews. Makes scrutineer a proper bot. Could be a lightweight HTTP server, GitHub Action, or GitLab CI job.
 - **Finding deduplication across runs** — if the same finding (same file, line, category) was already posted in a previous review, skip it. Avoids spamming the MR with repeated comments after re-review.
 - **Confidence scoring** — have the LLM self-rate confidence on each finding. Low-confidence findings get demoted or hidden behind a flag to reduce noise.
+- **Finding categorization** — add a category field to findings (e.g. security, style, performance) and allow filtering/sorting by category in the output and comments.
+- **Comprehensive docs and examples** — a full user guide with configuration examples, troubleshooting tips, and best practices for getting the most out of scrutineer.

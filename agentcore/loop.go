@@ -35,6 +35,8 @@ type LoopConfig struct {
 	AgentName      string
 	TracerTag      string
 	TraceMeta      map[string]string
+	TraceDir       string
+	OnTrace        func(TraceEntry)
 	NudgeMessage   string
 	StuckThreshold int
 	PerIterTimeout time.Duration
@@ -87,12 +89,23 @@ func RunLoop(ctx context.Context, llm *LLMClient, cfg LoopConfig) (lr *LoopResul
 
 	start := time.Now()
 
-	tracer, err := NewTracer(cfg.AgentName, cfg.TracerTag)
+	var (
+		tracer *Tracer
+		err    error
+	)
+	if cfg.TraceDir != "" {
+		tracer, err = NewTracerInDir(cfg.TraceDir, cfg.TracerTag)
+	} else {
+		tracer, err = NewTracer(cfg.AgentName, cfg.TracerTag)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("init tracer: %w", err)
 	}
 	for k, v := range cfg.TraceMeta {
 		tracer.SetMeta(k, v)
+	}
+	if cfg.OnTrace != nil {
+		tracer.OnLog = cfg.OnTrace
 	}
 	defer func() {
 		if retErr != nil {
