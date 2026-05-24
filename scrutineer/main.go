@@ -217,7 +217,9 @@ func cmdPost(args []string) {
 	configPath := fs.String("config", "", "path to config file")
 	repoPath := fs.String("repo", "", "path to local repo clone")
 	mrFlag := fs.String("mr", "", "post results for MR ID(s) (comma-separated)")
-	all := fs.Bool("all", false, "post all stored MR results")
+	branch := fs.String("branch", "", "post results for a branch")
+	commit := fs.String("commit", "", "post results for a commit SHA")
+	all := fs.Bool("all", false, "post all stored results")
 	comments := fs.String("comments", "", "comment style: summary, inline, or both")
 	fs.Parse(args)
 
@@ -252,16 +254,21 @@ func cmdPost(args []string) {
 		for _, id := range ids {
 			keys = append(keys, ResultKeyMR(id))
 		}
-	} else if *all {
+	}
+	if *branch != "" {
+		keys = append(keys, ResultKeyBranch(*branch))
+	}
+	if *commit != "" {
+		keys = append(keys, ResultKeyCommit(*commit))
+	}
+	if *all && len(keys) == 0 {
 		for _, r := range state.ListResults(cfg.Project) {
-			if strings.HasPrefix(r.Key, "mr:") {
-				keys = append(keys, r.Key)
-			}
+			keys = append(keys, r.Key)
 		}
 	}
 
 	if len(keys) == 0 {
-		fmt.Fprintf(os.Stderr, "nothing to post: specify --mr or --all\n")
+		fmt.Fprintf(os.Stderr, "nothing to post: specify --mr, --branch, --commit, or --all\n")
 		os.Exit(1)
 	}
 
@@ -285,50 +292,137 @@ func cmdPost(args []string) {
 			continue
 		}
 
-		idStr := strings.TrimPrefix(key, "mr:")
-		id, err := strconv.ParseInt(idStr, 10, 64)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "invalid key %s\n", key)
-			continue
+		switch {
+		case strings.HasPrefix(key, "mr:"):
+			postMRResult(ctx, forge, sr, key, style, cfg)
+		case strings.HasPrefix(key, "branch:"):
+			postBranchResult(ctx, forge, sr, key, cfg)
+		case strings.HasPrefix(key, "commit:"):
+			postCommitResult(ctx, forge, sr, key, cfg)
+		default:
+			fmt.Fprintf(os.Stderr, "unknown key type: %s\n", key)
 		}
-
-		pr, err := forge.Get(ctx, id)
-		if err != nil {
-			warnf("skip %s: get PR: %v", key, err)
-			continue
-		}
-
-		result := &ReviewResult{Findings: sr.Findings, RawOutput: sr.RawOutput, Model: sr.Model}
-
-		var comment string
-		if result.RawOutput != "" {
-			comment = result.RawOutput
-		} else {
-			comment = FormatComment(result, pr.Title)
-		}
-
-		postInline := result.RawOutput == "" && (style == "inline" || style == "both") && len(result.Findings) > 0
-		postSummary := style == "summary" || style == "both" || result.RawOutput != ""
-
-		if postInline {
-			inlineComments, _ := routeFindings(result.Findings, cfg.InlineSeverity)
-			if len(inlineComments) > 0 {
-				if err := forge.PostInlineComments(ctx, pr, inlineComments); err != nil {
-					errf("#%d: inline comments failed: %v", id, err)
-				} else {
-					logf("%s posted %s inline comment(s)", cl(ansiBold, fmt.Sprintf("#%d", id)), cl(ansiGreen, fmt.Sprintf("%d", len(inlineComments))))
-				}
-			}
-		}
-		if postSummary {
-			if err := forge.PostComment(ctx, id, comment); err != nil {
-				errf("skip #%d: post comment: %v", id, err)
-				continue
-			}
-		}
-
-		logf("%s %s %d finding(s)", cl(ansiBold, fmt.Sprintf("#%d", id)), cl(ansiGreen, "✓"), len(result.Findings))
 	}
+}
+
+func postMRResult(ctx context.Context, forge Forge, sr *StoredResult, key, style string, cfg Config) {
+	idStr := strings.TrimPrefix(key, "mr:")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "invalid key %s\n", key)
+		return
+	}
+
+	pr, err := forge.Get(ctx, id)
+	if err != nil {
+		warnf("skip %s: get PR: %v", key, err)
+		return
+	}
+
+	result := &ReviewResult{Findings: sr.Findings, Model: sr.Model}
+	comment := FormatComment(result, pr.Title)
+
+	postInline := (style == "inline" || style == "both") && len(result.Findings) > 0
+	postSummary := style == "summary" || style == "both"
+
+	if postInline {
+		inlineComments, _ := routeFindings(result.Findings, cfg.InlineSeverity)
+		if len(inlineComments) > 0 {
+			if err := forge.PostInlineComments(ctx, pr, inlineComments); err != nil {
+				errf("#%d: inline comments failed: %v", id, err)
+			} else {
+				logf("%s posted %s inline comment(s)", cl(ansiBold, fmt.Sprintf("#%d", id)), cl(ansiGreen, fmt.Sprintf("%d", len(inlineComments))))
+			}
+		}
+	}
+	if postSummary {
+		if err := forge.PostComment(ctx, id, comment); err != nil {
+			errf("skip #%d: post comment: %v", id, err)
+			return
+		}
+	}
+
+	logf("%s %s %d finding(s)", cl(ansiBold, fmt.Sprintf("#%d", id)), cl(ansiGreen, "✓"), len(result.Findings))
+}
+
+func postBranchResult(ctx context.Context, forge Forge, sr *StoredResult, key string, cfg Config) {
+	branchName := strings.TrimPrefix(key, "branch:")
+
+	if len(sr.Findings) == 0 {
+		logf("%s: no findings to post", key)
+		return
+	}
+
+	baseBranch := detectBaseBranch(cfg.RepoPath)
+	commits, err := branchCommits(cfg.RepoPath, branchName, baseBranch)
+	if err != nil {
+		warnf("skip %s: list commits: %v", key, err)
+		return
+	}
+
+	shaMap := make(map[string]string, len(commits))
+	for _, c := range commits {
+		shaMap[c.SHA] = c.SHA
+		if len(c.SHA) >= 8 {
+			shaMap[c.SHA[:8]] = c.SHA
+		}
+	}
+
+	minSeverity := cfg.InlineSeverity
+	if minSeverity == "" {
+		minSeverity = "minor"
+	}
+	minRank := severityRank[strings.ToLower(minSeverity)]
+
+	posted := 0
+	for _, f := range sr.Findings {
+		if f.CommitSHA == "" {
+			continue
+		}
+		if severityRank[strings.ToLower(f.Severity)] < minRank {
+			continue
+		}
+		file, line, ok := parseLocation(f.Location)
+		if !ok {
+			continue
+		}
+		sha, ok := shaMap[f.CommitSHA]
+		if !ok {
+			warnf("commit %s not found on branch %s, skipping", f.CommitSHA, branchName)
+			continue
+		}
+		body := formatInlineBody(f)
+		if err := forge.PostCommitComment(ctx, sha, file, line, body); err != nil {
+			warnf("commit comment on %s %s:%d failed: %v", f.CommitSHA, file, line, err)
+		} else {
+			posted++
+		}
+	}
+	logf("%s %s %d commit comment(s)", cl(ansiBold, branchName), cl(ansiGreen, "posted"), posted)
+}
+
+func postCommitResult(ctx context.Context, forge Forge, sr *StoredResult, key string, cfg Config) {
+	sha := strings.TrimPrefix(key, "commit:")
+	shortSHA := sha
+	if len(shortSHA) > 8 {
+		shortSHA = shortSHA[:8]
+	}
+
+	if len(sr.Findings) == 0 {
+		logf("%s: no findings to post", key)
+		return
+	}
+
+	inlineComments, _ := routeFindings(sr.Findings, cfg.InlineSeverity)
+	posted := 0
+	for _, ic := range inlineComments {
+		if err := forge.PostCommitComment(ctx, sha, ic.File, ic.Line, ic.Body); err != nil {
+			warnf("commit comment on %s:%d failed: %v", ic.File, ic.Line, err)
+		} else {
+			posted++
+		}
+	}
+	logf("%s %s %d commit comment(s)", cl(ansiBold, shortSHA), cl(ansiGreen, "posted"), posted)
 }
 
 func formatAge(t time.Time) string {
@@ -552,17 +646,34 @@ func runBranch(ctx context.Context, cfg Config, state *State, branchName string)
 		if err := cfg.ValidateForge(); err == nil {
 			forge, fErr := NewForge(cfg)
 			if fErr == nil {
+				shaMap := make(map[string]string, len(commits))
+				for _, c := range commits {
+					shaMap[c.SHA] = c.SHA
+					if len(c.SHA) >= 8 {
+						shaMap[c.SHA[:8]] = c.SHA
+					}
+				}
+
+				minSeverity := cfg.InlineSeverity
+				if minSeverity == "" {
+					minSeverity = "minor"
+				}
+				minRank := severityRank[strings.ToLower(minSeverity)]
+
 				posted := 0
 				for _, f := range result.Findings {
 					if f.CommitSHA == "" {
+						continue
+					}
+					if severityRank[strings.ToLower(f.Severity)] < minRank {
 						continue
 					}
 					file, line, ok := parseLocation(f.Location)
 					if !ok {
 						continue
 					}
-					sha := findFullSHA(commits, f.CommitSHA)
-					if sha == "" {
+					sha, ok := shaMap[f.CommitSHA]
+					if !ok {
 						continue
 					}
 					body := formatInlineBody(f)
@@ -646,15 +757,6 @@ func runCommit(ctx context.Context, cfg Config, state *State, sha string) error 
 	}
 
 	return nil
-}
-
-func findFullSHA(commits []Commit, short string) string {
-	for _, c := range commits {
-		if strings.HasPrefix(c.SHA, short) {
-			return c.SHA
-		}
-	}
-	return ""
 }
 
 func cliProgress(prefix string) ProgressFunc {
