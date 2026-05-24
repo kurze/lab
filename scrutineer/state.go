@@ -10,12 +10,13 @@ import (
 )
 
 type StoredResult struct {
-	Key       string        `json:"key"`
-	Title     string        `json:"title"`
-	Mode      string        `json:"mode"`
-	Findings  []Finding     `json:"findings"`
-	Model     string        `json:"model,omitempty"`
-	ReviewedAt time.Time    `json:"reviewed_at"`
+	Key        string    `json:"key"`
+	Title      string    `json:"title"`
+	Mode       string    `json:"mode"`
+	Findings   []Finding `json:"findings"`
+	RawOutput  string    `json:"raw_output"`
+	Model      string    `json:"model,omitempty"`
+	ReviewedAt time.Time `json:"reviewed_at"`
 }
 
 type State struct {

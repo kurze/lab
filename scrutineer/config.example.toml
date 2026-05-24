@@ -29,14 +29,42 @@
 # Minimum severity for inline comments: "info", "minor", "major", "critical" (default: "minor")
 # inline_severity = "minor"
 
+# Review agent: builtin (default), claude, codex, gemini, vibe, opencode, pi, custom
+# [agent]
+# name = "builtin"
+# command = ""         # only for name="custom"
+
 # External review command (receives diff on stdin, outputs JSON)
+# Equivalent to [agent] name="custom", command="..."
 # review_command = "my-reviewer"
 # review_agent = "my-reviewer/v1"
 
-# LLM configuration (alternative to review_command)
+# LLM provider for the builtin agent
+# Provider presets: lmstudio, ollama, mistral, openai, openrouter
 # [llm]
-# url = "http://localhost:1234"
+# provider = "lmstudio"
+# url = "http://localhost:1234/v1/chat/completions"
 # model = "model-name"
+# api_key = ""                    # or set REVIEW_LLM_API_KEY env var
 # context_size = 200000
 # token_ceiling = 150000
 # temperature = 0.3
+
+# --- Examples ---
+
+# Use Claude Code as the review agent:
+# [agent]
+# name = "claude"
+
+# Use the builtin agent with OpenRouter:
+# [agent]
+# name = "builtin"
+# [llm]
+# provider = "openrouter"
+# api_key = "sk-or-..."
+# model = "anthropic/claude-sonnet-4"
+
+# Use a local LM Studio instance (default):
+# [llm]
+# provider = "lmstudio"
+# model = "qwen3.6-35b-a3b@q4_k_s"

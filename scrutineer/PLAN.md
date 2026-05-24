@@ -112,20 +112,27 @@ Improve the review quality by refining the system prompt sent to the LLM. Detail
 - [ ] Benchmark prompt changes against a set of known MRs to measure finding quality
 - [ ] Allow user-provided prompt fragments via config (e.g. project-specific review guidelines)
 
-## Phase 10: Mistral Vibe support
+## Phase 10: Agent presets and provider support
 
-Add Mistral's Vibe coding model as a first-class agent option alongside the existing LLM backend.
+Support external CLI review agents (Claude Code, Codex, Gemini, etc.) and hosted LLM providers.
 
-- [ ] Extend agentcore LLMClient (or add a new client) to support API key authentication (`Authorization: Bearer` header) — currently the client sends no auth headers, which only works for local/unauthenticated endpoints
-- [ ] Add Mistral API endpoint support — Mistral uses an OpenAI-compatible API so the request/response format should work as-is
-- [ ] Add config fields for provider selection and API key:
-  - [ ] `provider`: `"openai-compat"` (default, current behavior) or `"mistral"`
-  - [ ] `api_key`: API key string, or `REVIEW_LLM_API_KEY` env var
-  - [ ] Default URL and model for Mistral: `mistral-vibe-latest`
-- [ ] Handle Mistral-specific quirks if any (tool call format differences, token counting, rate limits)
-- [ ] Validate that tool use works correctly with Mistral Vibe (function calling support)
-- [ ] Update `config.example.toml` with a Mistral Vibe example block
-- [ ] Test with Mistral Vibe on a representative set of MRs to tune temperature and token limits
+### Agent presets
+- [x] Add `[agent]` config section with `name` and `command` fields
+- [x] Built-in presets: `claude`, `codex`, `gemini`, `vibe`, `opencode`, `pi` (extensible via `agentPresets` map)
+- [x] `CLIReviewer` implementation: sends review prompt to CLI agent, captures raw text output
+- [x] Backward compat: `review_command` still works (treated as `agent.name = "custom"`)
+- [x] Raw output passthrough: CLI agents produce free text, posted as summary comment
+- [x] `RawOutput` field on `ReviewResult` and `StoredResult` for unstructured agent output
+- [ ] Test each agent preset with a real review (verify flags and invocation)
+
+### LLM provider presets
+- [x] `WithAPIKey` option on agentcore `LLMClient` — sets `Authorization: Bearer` header
+- [x] Provider preset system: `provider = "mistral"` sets default URL + model
+- [x] Built-in presets: `lmstudio`, `ollama`, `mistral`, `openai`, `openrouter`
+- [x] Config fields: `provider`, `api_key` in `[llm]` section; `REVIEW_LLM_API_KEY` env var
+- [x] Validate agent name and provider name against known presets
+- [x] Updated `config.example.toml` with agent and provider examples
+- [ ] Test with hosted providers (Mistral, OpenRouter) on real MRs
 
 ## Phase 11: Auto-fix via fixup commits
 

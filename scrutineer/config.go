@@ -5,39 +5,115 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 )
 
+type AgentConfig struct {
+	Name    string `toml:"name"`
+	Command string `toml:"command"`
+}
+
+type agentPreset struct {
+	Command string
+	Args    []string
+}
+
+var agentPresets = map[string]agentPreset{
+	"claude": {
+		Command: "claude",
+		Args:    []string{"-p", "--output-format", "text", "--permission-mode", "plan", "--bare"},
+	},
+	"codex": {
+		Command: "codex",
+		Args:    []string{"exec", "--sandbox", "read-only", "-a", "never", "--ephemeral"},
+	},
+	"gemini": {
+		Command: "gemini",
+		Args:    []string{"-p"},
+	},
+	"vibe": {
+		Command: "vibe",
+		Args:    []string{"--prompt"},
+	},
+	"opencode": {
+		Command: "opencode",
+		Args:    []string{"run", "-q"},
+	},
+	"pi": {
+		Command: "pi",
+		Args:    []string{"-p"},
+	},
+}
+
 type LLMConfig struct {
+	Provider     string  `toml:"provider"`
 	URL          string  `toml:"url"`
 	Model        string  `toml:"model"`
+	APIKey       string  `toml:"api_key"`
 	ContextSize  int     `toml:"context_size"`
 	TokenCeiling int     `toml:"token_ceiling"`
 	Temperature  float64 `toml:"temperature"`
 	Concurrency  int     `toml:"concurrency"`
 }
 
+type providerPreset struct {
+	URL   string
+	Model string
+}
+
+var providerPresets = map[string]providerPreset{
+	"lmstudio": {
+		URL:   "http://localhost:1234/v1/chat/completions",
+		Model: "default",
+	},
+	"ollama": {
+		URL:   "http://localhost:11434/v1/chat/completions",
+		Model: "llama3",
+	},
+	"mistral": {
+		URL:   "https://api.mistral.ai/v1/chat/completions",
+		Model: "mistral-small-latest",
+	},
+	"openai": {
+		URL:   "https://api.openai.com/v1/chat/completions",
+		Model: "gpt-4o",
+	},
+	"openrouter": {
+		URL:   "https://openrouter.ai/api/v1/chat/completions",
+		Model: "anthropic/claude-sonnet-4",
+	},
+}
+
 type Config struct {
-	ForgeType     string    `toml:"forge"`
-	ForgeURL      string    `toml:"forge_url"`
-	Token         string    `toml:"token"`
-	Project       string    `toml:"project"`
-	ReviewCommand string    `toml:"review_command"`
-	ReviewAgent   string    `toml:"review_agent"`
-	RepoPath      string    `toml:"repo_path"`
-	ReviewMode    string    `toml:"review_mode"`
-	Concurrency   int       `toml:"concurrency"`
-	LLM           LLMConfig `toml:"llm"`
-	CommentStyle   string   `toml:"comment_style"`
-	InlineSeverity string   `toml:"inline_severity"`
-	DryRun         bool     `toml:"-"`
+	ForgeType      string      `toml:"forge"`
+	ForgeURL       string      `toml:"forge_url"`
+	Token          string      `toml:"token"`
+	Project        string      `toml:"project"`
+	ReviewCommand  string      `toml:"review_command"`
+	ReviewAgent    string      `toml:"review_agent"`
+	RepoPath       string      `toml:"repo_path"`
+	ReviewMode     string      `toml:"review_mode"`
+	Concurrency    int         `toml:"concurrency"`
+	Agent          AgentConfig `toml:"agent"`
+	LLM            LLMConfig   `toml:"llm"`
+	CommentStyle   string      `toml:"comment_style"`
+	InlineSeverity string      `toml:"inline_severity"`
+	LogDir         string      `toml:"log_dir"`
+	LogMaxAgeDays  int         `toml:"log_max_age_days"`
+	LogMaxSizeMB   int         `toml:"log_max_size_mb"`
+	DryRun         bool        `toml:"-"`
+	Verbose        bool        `toml:"-"`
 }
 
 func loadConfig(path string) Config {
 	cfg := Config{
-		RepoPath:    ".",
-		Concurrency: 1,
+		RepoPath:      ".",
+		Concurrency:   1,
+		LogMaxAgeDays: 30,
+		LogMaxSizeMB:  500,
 		LLM: LLMConfig{
 			ContextSize:  200_000,
 			TokenCeiling: 150_000,
@@ -62,6 +138,15 @@ func loadConfig(path string) Config {
 		log.Printf("warning: config %s: %v", path, err)
 	}
 
+	if p, ok := providerPresets[cfg.LLM.Provider]; ok {
+		if cfg.LLM.URL == "" {
+			cfg.LLM.URL = p.URL
+		}
+		if cfg.LLM.Model == "" {
+			cfg.LLM.Model = p.Model
+		}
+	}
+
 	if v := os.Getenv("FORGE_URL"); v != "" {
 		cfg.ForgeURL = v
 	}
@@ -83,8 +168,14 @@ func loadConfig(path string) Config {
 	if v := os.Getenv("REVIEW_LLM_MODEL"); v != "" {
 		cfg.LLM.Model = v
 	}
+	if v := os.Getenv("REVIEW_LLM_API_KEY"); v != "" {
+		cfg.LLM.APIKey = v
+	}
 	if v := os.Getenv("REVIEW_MODE"); v != "" {
 		cfg.ReviewMode = v
+	}
+	if v := os.Getenv("SCRUTINEER_LOG_DIR"); v != "" {
+		cfg.LogDir = v
 	}
 
 	if cfg.ForgeType == "" || cfg.ForgeURL == "" || cfg.Project == "" {
@@ -103,12 +194,22 @@ func loadConfig(path string) Config {
 	return cfg
 }
 
+func resolveAgent(cfg Config) string {
+	if cfg.Agent.Name != "" {
+		return cfg.Agent.Name
+	}
+	if cfg.ReviewCommand != "" {
+		return "custom"
+	}
+	return "builtin"
+}
+
 func (c Config) CommitConcurrency() int {
 	var n int
-	if c.ReviewCommand != "" {
-		n = c.Concurrency
-	} else {
+	if resolveAgent(c) == "builtin" {
 		n = c.LLM.Concurrency
+	} else {
+		n = c.Concurrency
 	}
 	if n <= 0 {
 		return 1
@@ -130,8 +231,44 @@ func (c Config) Validate() error {
 	if err := c.ValidateForge(); err != nil {
 		return err
 	}
-	if c.ReviewCommand == "" && c.LLM.URL == "" {
-		return fmt.Errorf("review engine required: set review_command or [llm] url in config")
+	agent := resolveAgent(c)
+	switch agent {
+	case "builtin":
+		if c.LLM.URL == "" {
+			return fmt.Errorf("builtin agent requires [llm] url (or set provider)")
+		}
+	case "custom":
+		cmd := c.Agent.Command
+		if cmd == "" {
+			cmd = c.ReviewCommand
+		}
+		if cmd == "" {
+			return fmt.Errorf("custom agent requires agent.command or review_command")
+		}
+	default:
+		if _, ok := agentPresets[agent]; !ok {
+			names := []string{"builtin", "custom"}
+			for k := range agentPresets {
+				names = append(names, k)
+			}
+			sort.Strings(names)
+			return fmt.Errorf("unknown agent %q (known: %s)", agent, strings.Join(names, ", "))
+		}
+	}
+	if agent != "builtin" && agent != "custom" {
+		if c.ReviewMode == "commits" || c.ReviewMode == "both" {
+			return fmt.Errorf("CLI agent %q only supports review_mode \"full\" (commits/both mode requires structured findings)", agent)
+		}
+	}
+	if c.LLM.Provider != "" {
+		if _, ok := providerPresets[c.LLM.Provider]; !ok {
+			names := make([]string, 0, len(providerPresets))
+			for k := range providerPresets {
+				names = append(names, k)
+			}
+			sort.Strings(names)
+			return fmt.Errorf("unknown llm provider %q (known: %s)", c.LLM.Provider, strings.Join(names, ", "))
+		}
 	}
 	switch c.ReviewMode {
 	case "", "full", "commits", "both":
