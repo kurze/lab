@@ -61,14 +61,14 @@ Replace the bubbletea TUI with CLI subcommands that cover the same functionality
 
 Review local branches and individual commits outside of MR context, with optional forge commit comments.
 
-- [ ] Extend `--branch` to post findings via forge commit comments when `--post` is set
-- [ ] Add `--commit <sha>` to review a single commit (get diff via `git show`, review, optionally post)
-- [ ] Extend `Forge` interface with `PostCommitComment(ctx, sha, file, line, body)` for both GitLab and GitHub
-  - [ ] GitLab: `POST /projects/:id/repository/commits/:sha/comments` (supports `path`, `line`)
-  - [ ] GitHub: `POST /repos/{owner}/{repo}/commits/{sha}/comments` (supports `path`, `line`)
-- [ ] When `--post` is set on `--branch`, post inline findings on each commit's SHA
-- [ ] When `--post` is set on `--commit`, post findings on that SHA
-- [ ] Without `--post`, output to stdout as today
+- [x] Extend `--branch` to post findings via forge commit comments when `--post` is set
+- [x] Add `--commit <sha>` to review a single commit (get diff via `git show`, review, optionally post)
+- [x] Extend `Forge` interface with `PostCommitComment(ctx, sha, file, line, body)` for both GitLab and GitHub
+  - [x] GitLab: `POST /projects/:id/repository/commits/:sha/comments` (supports `path`, `line`)
+  - [x] GitHub: `POST /repos/{owner}/{repo}/commits/{sha}/comments` (supports `path`, `line`)
+- [x] When `--post` is set on `--branch`, post inline findings on each commit's SHA
+- [x] When `--post` is set on `--commit`, post findings on that SHA
+- [x] Without `--post`, output to stdout as today
 
 ## Phase 6: Polish and configuration
 
