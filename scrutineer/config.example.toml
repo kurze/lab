@@ -29,6 +29,16 @@
 # Minimum severity for inline comments: "info", "minor", "major", "critical" (default: "minor")
 # inline_severity = "minor"
 
+# Review prompt configuration
+# [review]
+# focus = "security"                           # optional: "", "security", "performance", "style"
+# guidelines = """
+# - All SQL queries must use parameterized statements
+# - HTTP handlers must validate Content-Type header
+# - Error messages must not leak internal paths
+# """
+# guidelines_file = ".scrutineer-guidelines.md" # loaded and appended to guidelines
+
 # Review agent: builtin (default), claude, codex, gemini, vibe, opencode, pi, custom
 # [agent]
 # name = "builtin"

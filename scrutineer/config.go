@@ -87,6 +87,12 @@ var providerPresets = map[string]providerPreset{
 	},
 }
 
+type ReviewPromptConfig struct {
+	Focus          string `toml:"focus"`
+	Guidelines     string `toml:"guidelines"`
+	GuidelinesFile string `toml:"guidelines_file"`
+}
+
 type Config struct {
 	ForgeType      string      `toml:"forge"`
 	ForgeURL       string      `toml:"forge_url"`
@@ -101,9 +107,10 @@ type Config struct {
 	LLM            LLMConfig   `toml:"llm"`
 	CommentStyle   string      `toml:"comment_style"`
 	InlineSeverity string      `toml:"inline_severity"`
-	LogDir         string      `toml:"log_dir"`
-	LogMaxAgeDays  int         `toml:"log_max_age_days"`
-	LogMaxSizeMB   int         `toml:"log_max_size_mb"`
+	Review         ReviewPromptConfig `toml:"review"`
+	LogDir         string             `toml:"log_dir"`
+	LogMaxAgeDays  int                `toml:"log_max_age_days"`
+	LogMaxSizeMB   int                `toml:"log_max_size_mb"`
 	DryRun         bool        `toml:"-"`
 	Verbose        bool        `toml:"-"`
 }
@@ -176,6 +183,33 @@ func loadConfig(path string) Config {
 	}
 	if v := os.Getenv("SCRUTINEER_LOG_DIR"); v != "" {
 		cfg.LogDir = v
+	}
+
+	if cfg.Review.GuidelinesFile != "" {
+		gpath := cfg.Review.GuidelinesFile
+		if !filepath.IsAbs(gpath) {
+			gpath = filepath.Join(cfg.RepoPath, gpath)
+		}
+		gpath = filepath.Clean(gpath)
+		repoAbs, _ := filepath.Abs(cfg.RepoPath)
+		if repoAbs != "" && !strings.HasPrefix(gpath, repoAbs+string(filepath.Separator)) && gpath != repoAbs {
+			log.Printf("warning: guidelines_file %s is outside repo directory, skipping", cfg.Review.GuidelinesFile)
+		} else {
+			data, err := os.ReadFile(gpath)
+			if err != nil {
+				log.Printf("warning: guidelines file %s: %v", cfg.Review.GuidelinesFile, err)
+			} else {
+				const maxGuidelinesSize = 64 * 1024
+				if len(data) > maxGuidelinesSize {
+					log.Printf("warning: guidelines file %s exceeds %d bytes, truncating", cfg.Review.GuidelinesFile, maxGuidelinesSize)
+					data = data[:maxGuidelinesSize]
+				}
+				if cfg.Review.Guidelines != "" {
+					cfg.Review.Guidelines += "\n\n"
+				}
+				cfg.Review.Guidelines += string(data)
+			}
+		}
 	}
 
 	if cfg.ForgeType == "" || cfg.ForgeURL == "" || cfg.Project == "" {
@@ -269,6 +303,11 @@ func (c Config) Validate() error {
 			sort.Strings(names)
 			return fmt.Errorf("unknown llm provider %q (known: %s)", c.LLM.Provider, strings.Join(names, ", "))
 		}
+	}
+	switch c.Review.Focus {
+	case "", "security", "performance", "style":
+	default:
+		return fmt.Errorf("invalid review.focus %q (valid: security, performance, style, or omit for default)", c.Review.Focus)
 	}
 	switch c.ReviewMode {
 	case "", "full", "commits", "both":
