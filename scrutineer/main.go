@@ -748,21 +748,8 @@ func runBranch(ctx context.Context, cfg Config, state *State, branchName string)
 		fmt.Printf("--- %s (%d finding(s)) ---\n%s\n", branchName, len(result.Findings), comment)
 	}
 
-	if (cfg.Fix || cfg.FixDryRun) && result.RawOutput == "" && len(result.Findings) > 0 {
-		if llmr, ok := reviewer.(*LLMReviewer); ok {
-			fixResults, err := generateFixes(ctx, llmr.LLM, llmr.Model, result.Findings, FixOptions{
-				DryRun:    cfg.FixDryRun,
-				Threshold: cfg.FixThreshold,
-				WorkDir:   cfg.RepoPath,
-			})
-			if err != nil {
-				warnf("fix generation failed: %v", err)
-			} else {
-				printFixResults(fixResults)
-			}
-		} else {
-			warnf("--fix requires builtin agent")
-		}
+	if result.RawOutput == "" {
+		tryGenerateFixes(ctx, cfg, reviewer, result.Findings, cfg.RepoPath, branchName)
 	}
 
 	if !cfg.DryRun && result.RawOutput == "" && len(result.Findings) > 0 {
@@ -865,21 +852,8 @@ func runCommit(ctx context.Context, cfg Config, state *State, sha string) error 
 		fmt.Printf("--- commit %s (%d finding(s)) ---\n%s\n", shortSHA, len(result.Findings), comment)
 	}
 
-	if (cfg.Fix || cfg.FixDryRun) && result.RawOutput == "" && len(result.Findings) > 0 {
-		if llmr, ok := reviewer.(*LLMReviewer); ok {
-			fixResults, fErr := generateFixes(ctx, llmr.LLM, llmr.Model, result.Findings, FixOptions{
-				DryRun:    cfg.FixDryRun,
-				Threshold: cfg.FixThreshold,
-				WorkDir:   cfg.RepoPath,
-			})
-			if fErr != nil {
-				warnf("fix generation failed: %v", fErr)
-			} else {
-				printFixResults(fixResults)
-			}
-		} else {
-			warnf("--fix requires builtin agent")
-		}
+	if result.RawOutput == "" {
+		tryGenerateFixes(ctx, cfg, reviewer, result.Findings, cfg.RepoPath, shortSHA)
 	}
 
 	if !cfg.DryRun && result.RawOutput == "" && len(result.Findings) > 0 {
@@ -991,6 +965,27 @@ func setReviewerMeta(r Reviewer, meta map[string]string) {
 }
 
 
+
+func tryGenerateFixes(ctx context.Context, cfg Config, reviewer Reviewer, findings []Finding, workDir string, label string) {
+	if (!cfg.Fix && !cfg.FixDryRun) || len(findings) == 0 {
+		return
+	}
+	llmr, ok := reviewer.(*LLMReviewer)
+	if !ok {
+		warnf("--fix requires builtin agent")
+		return
+	}
+	results, err := generateFixes(ctx, llmr.LLM, llmr.Model, findings, FixOptions{
+		DryRun:    cfg.FixDryRun,
+		Threshold: cfg.FixThreshold,
+		WorkDir:   workDir,
+	})
+	if err != nil {
+		warnf("%s fix generation failed: %v", label, err)
+		return
+	}
+	printFixResults(results)
+}
 
 type MRTarget struct {
 	ID   int64
@@ -1262,21 +1257,8 @@ func run(ctx context.Context, cfg Config, state *State, targets []MRTarget) erro
 			comment = FormatComment(result, pr.Title)
 		}
 
-		if (cfg.Fix || cfg.FixDryRun) && result.RawOutput == "" && len(result.Findings) > 0 {
-			if llmr, ok := reviewer.(*LLMReviewer); ok {
-				fixResults, fErr := generateFixes(ctx, llmr.LLM, llmr.Model, result.Findings, FixOptions{
-					DryRun:    cfg.FixDryRun,
-					Threshold: cfg.FixThreshold,
-					WorkDir:   worktreeDir,
-				})
-				if fErr != nil {
-					warnf("#%d: fix generation failed: %v", pr.ID, fErr)
-				} else {
-					printFixResults(fixResults)
-				}
-			} else {
-				warnf("--fix requires builtin agent")
-			}
+		if result.RawOutput == "" {
+			tryGenerateFixes(ctx, cfg, reviewer, result.Findings, worktreeDir, fmt.Sprintf("#%d", pr.ID))
 		}
 		cleanup()
 
