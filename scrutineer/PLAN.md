@@ -138,13 +138,13 @@ Support external CLI review agents (Claude Code, Codex, Gemini, etc.) and hosted
 
 Automatically generate fixup commits for findings above a configurable severity threshold.
 
-- [ ] Add `--fix` flag to `review` subcommand: after review, attempt to generate fixes for qualifying findings
-- [ ] Add `fix_threshold` config option (default: `"minor"`) — only generate fixes for findings at or above this severity
-- [ ] For each qualifying finding, send the finding + relevant file context to the LLM and ask for a concrete patch
-- [ ] Apply each patch as its own `fixup!` commit targeting the original commit (`git commit --fixup=<sha>`) — one fixup per finding for clarity, user squashes after review
-- [ ] Add `--fix-dry-run` flag to preview generated patches without committing
-- [ ] Add `fix` subcommand to generate fixes from previously stored review results (without re-running the review)
-- [ ] Handle conflicts gracefully: skip fix if patch doesn't apply cleanly, report to user
+- [x] Add `--fix` flag to `review` subcommand: after review, attempt to generate fixes for qualifying findings
+- [x] Add `fix_threshold` config option (default: `"minor"`) — only generate fixes for findings at or above this severity
+- [x] For each qualifying finding, send the finding + relevant file context to the LLM and ask for a concrete patch
+- [x] Apply each patch as its own `fixup!` commit targeting the original commit (`git commit --fixup=<sha>`) — one fixup per finding for clarity, user squashes after review
+- [x] Add `--fix-dry-run` flag to preview generated patches without committing
+- [x] Add `fix` subcommand to generate fixes from previously stored review results (without re-running the review)
+- [x] Handle conflicts gracefully: skip fix if patch doesn't apply cleanly, report to user
 
 ---
 
