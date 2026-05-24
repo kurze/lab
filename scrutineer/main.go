@@ -22,6 +22,7 @@ Commands:
   list        List merge/pull requests and their review status
   show        Display stored review findings
   post        Post stored review findings to the forge
+  fix         Generate fixup commits from stored review findings
   logs        Browse and manage LLM exchange traces
   completion  Generate shell completion scripts (bash, zsh, fish)
 
@@ -44,6 +45,8 @@ func main() {
 		cmdShow(os.Args[2:])
 	case "post":
 		cmdPost(os.Args[2:])
+	case "fix":
+		cmdFix(os.Args[2:])
 	case "logs":
 		cmdLogs(os.Args[2:])
 	case "completion":
@@ -305,6 +308,100 @@ func cmdPost(args []string) {
 	}
 }
 
+func cmdFix(args []string) {
+	fs := flag.NewFlagSet("fix", flag.ExitOnError)
+	project := fs.String("project", "", "project path (owner/repo)")
+	configPath := fs.String("config", "", "path to config file")
+	repoPath := fs.String("repo", "", "path to local repo clone")
+	mrFlag := fs.String("mr", "", "fix findings for MR ID(s) (comma-separated)")
+	branch := fs.String("branch", "", "fix findings for a branch")
+	commit := fs.String("commit", "", "fix findings for a commit SHA")
+	dryRun := fs.Bool("dry-run", false, "preview patches without committing")
+	model := fs.String("model", "", "LLM model (overrides config)")
+	fs.Parse(args)
+
+	cfg := loadConfig(*configPath)
+	if *project != "" {
+		cfg.Project = *project
+	}
+	if *repoPath != "" {
+		cfg.RepoPath = *repoPath
+	}
+	if *model != "" {
+		cfg.LLM.Model = *model
+	}
+
+	if err := validateReviewEngine(cfg); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+
+	state, err := LoadState("")
+	if err != nil {
+		log.Fatalf("state: %v", err)
+	}
+
+	var keys []string
+	if *mrFlag != "" {
+		ids, err := parseMRIDs(*mrFlag)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
+		for _, id := range ids {
+			keys = append(keys, ResultKeyMR(id))
+		}
+	}
+	if *branch != "" {
+		keys = append(keys, ResultKeyBranch(*branch))
+	}
+	if *commit != "" {
+		keys = append(keys, ResultKeyCommit(*commit))
+	}
+
+	if len(keys) == 0 {
+		fmt.Fprintf(os.Stderr, "nothing to fix: specify --mr, --branch, or --commit\n")
+		os.Exit(1)
+	}
+
+	reviewer := newReviewer(cfg)
+	llmr, ok := reviewer.(*LLMReviewer)
+	if !ok {
+		log.Fatal("fix subcommand requires builtin agent")
+	}
+
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer cancel()
+
+	for _, key := range keys {
+		sr := state.GetResult(cfg.Project, key)
+		if sr == nil {
+			warnf("no stored result for %s", key)
+			continue
+		}
+		if len(sr.Findings) == 0 && sr.RawOutput == "" {
+			logf("%s: no findings to fix", key)
+			continue
+		}
+		if sr.RawOutput != "" {
+			warnf("%s: raw output results cannot be fixed (requires structured findings)", key)
+			continue
+		}
+
+		logf("fixing %s: %s", cl(ansiBold, key), sr.Title)
+		results, err := generateFixes(ctx, llmr.LLM, llmr.Model, sr.Findings, FixOptions{
+			DryRun:    *dryRun,
+			Threshold: cfg.FixThreshold,
+			WorkDir:   cfg.RepoPath,
+		})
+		if err != nil {
+			warnf("%s: fix generation failed: %v", key, err)
+			continue
+		}
+		printFixResults(results)
+	}
+}
+
 func postMRResult(ctx context.Context, forge Forge, sr *StoredResult, key, style string, cfg Config) {
 	idStr := strings.TrimPrefix(key, "mr:")
 	id, err := strconv.ParseInt(idStr, 10, 64)
@@ -462,6 +559,8 @@ func cmdReview(args []string) {
 	agent := fs.String("agent", "", "review agent: builtin, claude, codex, gemini, vibe, opencode, pi, custom")
 	model := fs.String("model", "", "LLM model (overrides config)")
 	verbose := fs.Bool("verbose", false, "print LLM exchanges to stderr in real time")
+	fix := fs.Bool("fix", false, "generate fixup commits for qualifying findings after review")
+	fixDryRun := fs.Bool("fix-dry-run", false, "preview generated patches without committing")
 	fs.Parse(args)
 
 	cfg := loadConfig(*configPath)
@@ -479,6 +578,8 @@ func cmdReview(args []string) {
 	}
 	cfg.DryRun = !*post
 	cfg.Verbose = *verbose
+	cfg.Fix = *fix
+	cfg.FixDryRun = *fixDryRun
 	if *mode != "" {
 		cfg.ReviewMode = *mode
 	}
@@ -647,6 +748,23 @@ func runBranch(ctx context.Context, cfg Config, state *State, branchName string)
 		fmt.Printf("--- %s (%d finding(s)) ---\n%s\n", branchName, len(result.Findings), comment)
 	}
 
+	if (cfg.Fix || cfg.FixDryRun) && result.RawOutput == "" && len(result.Findings) > 0 {
+		if llmr, ok := reviewer.(*LLMReviewer); ok {
+			fixResults, err := generateFixes(ctx, llmr.LLM, llmr.Model, result.Findings, FixOptions{
+				DryRun:    cfg.FixDryRun,
+				Threshold: cfg.FixThreshold,
+				WorkDir:   cfg.RepoPath,
+			})
+			if err != nil {
+				warnf("fix generation failed: %v", err)
+			} else {
+				printFixResults(fixResults)
+			}
+		} else {
+			warnf("--fix requires builtin agent")
+		}
+	}
+
 	if !cfg.DryRun && result.RawOutput == "" && len(result.Findings) > 0 {
 		if err := cfg.ValidateForge(); err == nil {
 			forge, fErr := NewForge(cfg)
@@ -745,6 +863,23 @@ func runCommit(ctx context.Context, cfg Config, state *State, sha string) error 
 	} else {
 		comment := FormatComment(result, fmt.Sprintf("commit %s", shortSHA))
 		fmt.Printf("--- commit %s (%d finding(s)) ---\n%s\n", shortSHA, len(result.Findings), comment)
+	}
+
+	if (cfg.Fix || cfg.FixDryRun) && result.RawOutput == "" && len(result.Findings) > 0 {
+		if llmr, ok := reviewer.(*LLMReviewer); ok {
+			fixResults, fErr := generateFixes(ctx, llmr.LLM, llmr.Model, result.Findings, FixOptions{
+				DryRun:    cfg.FixDryRun,
+				Threshold: cfg.FixThreshold,
+				WorkDir:   cfg.RepoPath,
+			})
+			if fErr != nil {
+				warnf("fix generation failed: %v", fErr)
+			} else {
+				printFixResults(fixResults)
+			}
+		} else {
+			warnf("--fix requires builtin agent")
+		}
 	}
 
 	if !cfg.DryRun && result.RawOutput == "" && len(result.Findings) > 0 {
@@ -1080,8 +1215,8 @@ func run(ctx context.Context, cfg Config, state *State, targets []MRTarget) erro
 				continue
 			}
 			branchResult, err := reviewer.ReviewWithContext(ctx, worktreeDir, diff, digest)
-			cleanup()
 			if err != nil {
+				cleanup()
 				warnf("skip #%d: branch repass: %v", pr.ID, err)
 				continue
 			}
@@ -1102,8 +1237,8 @@ func run(ctx context.Context, cfg Config, state *State, targets []MRTarget) erro
 				continue
 			}
 			commitResults, err := reviewByCommits(ctx, reviewer, worktreeDir, commits, &ReviewByCommitsOpts{State: state, Project: cfg.Project, OnProgress: cliProgress(fmt.Sprintf("#%d", pr.ID)), Concurrency: cfg.CommitConcurrency()})
-			cleanup()
 			if err != nil {
+				cleanup()
 				warnf("skip #%d: review: %v", pr.ID, err)
 				continue
 			}
@@ -1119,13 +1254,31 @@ func run(ctx context.Context, cfg Config, state *State, targets []MRTarget) erro
 			}
 			logf("%s %s reviewing full diff...", cl(ansiBold, fmt.Sprintf("#%d", pr.ID)), cl(ansiCyan, "⟳"))
 			result, err = reviewer.ReviewFull(ctx, worktreeDir, diff)
-			cleanup()
 			if err != nil {
+				cleanup()
 				warnf("skip #%d: review: %v", pr.ID, err)
 				continue
 			}
 			comment = FormatComment(result, pr.Title)
 		}
+
+		if (cfg.Fix || cfg.FixDryRun) && result.RawOutput == "" && len(result.Findings) > 0 {
+			if llmr, ok := reviewer.(*LLMReviewer); ok {
+				fixResults, fErr := generateFixes(ctx, llmr.LLM, llmr.Model, result.Findings, FixOptions{
+					DryRun:    cfg.FixDryRun,
+					Threshold: cfg.FixThreshold,
+					WorkDir:   worktreeDir,
+				})
+				if fErr != nil {
+					warnf("#%d: fix generation failed: %v", pr.ID, fErr)
+				} else {
+					printFixResults(fixResults)
+				}
+			} else {
+				warnf("--fix requires builtin agent")
+			}
+		}
+		cleanup()
 
 		if result.RawOutput != "" {
 			comment = result.RawOutput
