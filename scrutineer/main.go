@@ -606,18 +606,18 @@ func findFullSHA(commits []Commit, short string) string {
 
 func cliProgress(prefix string) ProgressFunc {
 	return func(ev CommitProgressEvent) {
-		p := prefix
-		if p != "" {
-			p = cl(ansiBold, p) + " "
+		p := ""
+		if prefix != "" {
+			p = cl(ansiBold, prefix) + " "
 		}
 		sha := cl(ansiDim, ev.SHA)
 		switch ev.Status {
 		case CommitStarted:
-			logf("%s %s commit %d/%d: %s %s", p, cl(ansiCyan, "⟳"), ev.Index, ev.Total, sha, ev.Message)
+			logf("%s%s commit %d/%d: %s %s", p, cl(ansiCyan, "⟳"), ev.Index, ev.Total, sha, ev.Message)
 		case CommitDone:
-			logf("%s %s commit %d/%d: %s %s", p, cl(ansiGreen, "✓"), ev.Index, ev.Total, sha, ev.Message)
+			logf("%s%s commit %d/%d: %s %s", p, cl(ansiGreen, "✓"), ev.Index, ev.Total, sha, ev.Message)
 		case CommitFailed:
-			logf("%s %s commit %d/%d: %s %s — %v", p, cl(ansiRed, "✗"), ev.Index, ev.Total, sha, ev.Message, ev.Err)
+			logf("%s%s commit %d/%d: %s %s — %v", p, cl(ansiRed, "✗"), ev.Index, ev.Total, sha, ev.Message, ev.Err)
 		}
 	}
 }
@@ -718,9 +718,13 @@ func formatTokens(n int) string {
 func printSummaryTable(summaries []mrSummary, totalDuration time.Duration) {
 	fmt.Fprintf(os.Stderr, "\n%s\n", cl(ansiBold, "Summary"))
 	fmt.Fprintf(os.Stderr, "%s\n", cl(ansiDim, strings.Repeat("─", 72)))
-	fmt.Fprintf(os.Stderr, "%-8s %-9s %-8s %-9s %-10s %s\n",
-		cl(ansiDim, "MR"), cl(ansiDim, "Findings"), cl(ansiDim, "Posted"),
-		cl(ansiDim, "Tokens"), cl(ansiDim, "Duration"), cl(ansiDim, "Status"))
+	fmt.Fprintf(os.Stderr, "%s %s %s %s %s %s\n",
+		cl(ansiDim, fmt.Sprintf("%-7s", "MR")),
+		cl(ansiDim, fmt.Sprintf("%-9s", "Findings")),
+		cl(ansiDim, fmt.Sprintf("%-8s", "Posted")),
+		cl(ansiDim, fmt.Sprintf("%-9s", "Tokens")),
+		cl(ansiDim, fmt.Sprintf("%-10s", "Duration")),
+		cl(ansiDim, "Status"))
 	fmt.Fprintf(os.Stderr, "%s\n", cl(ansiDim, strings.Repeat("─", 72)))
 
 	totalTokens := 0

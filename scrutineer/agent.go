@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 
 	"github.com/kurze/lab/agentcore"
 )
@@ -80,7 +79,7 @@ func (r *LLMReviewer) review(ctx context.Context, workDir string, diff string, f
 
 	result, err := r.extractFindings(ctx, reviewText)
 	if err != nil {
-		log.Printf("warning: extraction failed, returning empty findings: %v", err)
+		warnf("extraction failed, returning empty findings: %v", err)
 		return &ReviewResult{Findings: []Finding{}, Model: r.Model, TokensUsed: lr.TokensUsed}, nil
 	}
 	result.Model = r.Model
@@ -127,7 +126,7 @@ func (r *LLMReviewer) ReviewWithContext(ctx context.Context, workDir string, dif
 
 	result, err := r.extractFindings(ctx, reviewText)
 	if err != nil {
-		log.Printf("warning: extraction failed, returning empty findings: %v", err)
+		warnf("extraction failed, returning empty findings: %v", err)
 		return &ReviewResult{Findings: []Finding{}, Model: r.Model, TokensUsed: lr.TokensUsed}, nil
 	}
 	result.Model = r.Model
