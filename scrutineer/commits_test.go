@@ -4,6 +4,27 @@ import (
 	"testing"
 )
 
+func TestIsFixupCommit(t *testing.T) {
+	tests := []struct {
+		msg  string
+		want bool
+	}{
+		{"fixup! add error handling", true},
+		{"squash! refactor config loading", true},
+		{"fix something important", false},
+		{"normal commit message", false},
+		{"  fixup! leading whitespace", true},
+		{"  squash! leading whitespace", true},
+		{"fixup without bang", false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		if got := isFixupCommit(tt.msg); got != tt.want {
+			t.Errorf("isFixupCommit(%q) = %v, want %v", tt.msg, got, tt.want)
+		}
+	}
+}
+
 func TestMergeCommitResults_Empty(t *testing.T) {
 	result := mergeCommitResults(nil)
 	if len(result.Findings) != 0 {

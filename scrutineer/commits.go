@@ -137,6 +137,9 @@ func reviewByCommits(ctx context.Context, reviewer Reviewer, worktreeDir string,
 			}
 
 			taggedDiff := fmt.Sprintf("Commit: %s — %s\n\n%s", item.sha, item.msg, item.diff)
+			if isFixupCommit(item.commit.Message) {
+				taggedDiff = fmt.Sprintf("Commit: %s — %s\n[NOTE: This is a fixup/squash commit. Focus on correctness of the fix, not style.]\n\n%s", item.sha, item.msg, item.diff)
+			}
 			result, err := reviewer.Review(ctx, worktreeDir, taggedDiff)
 			if err != nil {
 				errf("  commit %s review failed: %v", item.sha, err)
@@ -200,6 +203,11 @@ func commitDiff(worktreeDir, sha string) (string, error) {
 		return "", err
 	}
 	return string(out), nil
+}
+
+func isFixupCommit(message string) bool {
+	msg := strings.TrimSpace(message)
+	return strings.HasPrefix(msg, "fixup! ") || strings.HasPrefix(msg, "squash! ")
 }
 
 func isMergeCommit(worktreeDir, sha string) bool {
