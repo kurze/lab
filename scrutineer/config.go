@@ -104,8 +104,11 @@ type Config struct {
 	LogDir         string      `toml:"log_dir"`
 	LogMaxAgeDays  int         `toml:"log_max_age_days"`
 	LogMaxSizeMB   int         `toml:"log_max_size_mb"`
+	FixThreshold   string      `toml:"fix_threshold"`
 	DryRun         bool        `toml:"-"`
 	Verbose        bool        `toml:"-"`
+	Fix            bool        `toml:"-"`
+	FixDryRun      bool        `toml:"-"`
 }
 
 func loadConfig(path string) Config {
@@ -284,6 +287,11 @@ func (c Config) Validate() error {
 	case "", "info", "minor", "major", "critical":
 	default:
 		return fmt.Errorf("invalid inline_severity %q (valid: info, minor, major, critical)", c.InlineSeverity)
+	}
+	switch c.FixThreshold {
+	case "", "info", "minor", "major", "critical":
+	default:
+		return fmt.Errorf("invalid fix_threshold %q (valid: info, minor, major, critical)", c.FixThreshold)
 	}
 	return nil
 }
