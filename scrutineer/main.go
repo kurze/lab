@@ -18,11 +18,12 @@ func usage() {
 	fmt.Fprintf(os.Stderr, `Usage: scrutineer <command> [flags]
 
 Commands:
-  review    Review merge/pull requests or local branches
-  list      List merge/pull requests and their review status
-  show      Display stored review findings
-  post      Post stored review findings to the forge
-  logs      Browse and manage LLM exchange traces
+  review      Review merge/pull requests or local branches
+  list        List merge/pull requests and their review status
+  show        Display stored review findings
+  post        Post stored review findings to the forge
+  logs        Browse and manage LLM exchange traces
+  completion  Generate shell completion scripts (bash, zsh, fish)
 
 Run 'scrutineer <command> -h' for command-specific help.
 `)
@@ -45,6 +46,8 @@ func main() {
 		cmdPost(os.Args[2:])
 	case "logs":
 		cmdLogs(os.Args[2:])
+	case "completion":
+		cmdCompletion(os.Args[2:])
 	case "-h", "--help", "help":
 		usage()
 	default:
@@ -59,6 +62,7 @@ func cmdList(args []string) {
 	configPath := fs.String("config", "", "path to config file")
 	repoPath := fs.String("repo", "", "path to local repo clone")
 	filterFlag := fs.String("filter", "all", "filter: all, unreviewed, reviewed")
+	formatFlag := fs.String("format", "", "output format (ids: one ID per line, for shell completion)")
 	fs.Parse(args)
 
 	cfg := loadConfig(*configPath)
@@ -92,6 +96,11 @@ func cmdList(args []string) {
 		log.Fatalf("list: %v", err)
 	}
 
+	if *formatFlag != "" && *formatFlag != "ids" {
+		fmt.Fprintf(os.Stderr, "error: invalid format %q (valid: ids)\n", *formatFlag)
+		os.Exit(1)
+	}
+
 	for _, pr := range prs {
 		reviewed := state.IsReviewed(cfg.Project, pr.ID)
 
@@ -108,6 +117,11 @@ func cmdList(args []string) {
 		default:
 			fmt.Fprintf(os.Stderr, "error: invalid filter %q (valid: all, unreviewed, reviewed)\n", *filterFlag)
 			os.Exit(1)
+		}
+
+		if *formatFlag == "ids" {
+			fmt.Println(pr.ID)
+			continue
 		}
 
 		status := "  "
