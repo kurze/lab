@@ -106,11 +106,11 @@ Generate shell completion scripts for bash, zsh, and fish.
 
 Improve the review quality by refining the system prompt sent to the LLM. Details TBD at implementation time.
 
-- [ ] Audit current prompt for verbosity, ambiguity, and missed instructions
-- [ ] Structure prompt with clear sections (role, task, constraints, output format)
-- [ ] Add configurable prompt templates or overlays for different review styles (security-focused, performance-focused, etc.)
+- [x] Audit current prompt for verbosity, ambiguity, and missed instructions
+- [x] Structure prompt with clear sections (role, task, constraints, output format)
+- [x] Add configurable prompt templates or overlays for different review styles (security-focused, performance-focused, etc.)
 - [ ] Benchmark prompt changes against a set of known MRs to measure finding quality
-- [ ] Allow user-provided prompt fragments via config (e.g. project-specific review guidelines)
+- [x] Allow user-provided prompt fragments via config (e.g. project-specific review guidelines)
 
 ## Phase 10: Agent presets and provider support
 
