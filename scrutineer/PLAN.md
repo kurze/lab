@@ -96,11 +96,11 @@ Capture all LLM request/response exchanges so they can be reviewed after the fac
 
 Generate shell completion scripts for bash, zsh, and fish.
 
-- [ ] Add `completion` subcommand: `scrutineer completion bash|zsh|fish`
-- [ ] Complete subcommands, flags, and flag values (e.g. `--mode full|commits|both`)
-- [ ] Dynamic completion for MR IDs where feasible (query forge for open MRs)
-- [ ] Include installation instructions in `--help` output for each shell
-- [ ] Consider using cobra/ff completion generation if the CLI framework supports it, otherwise hand-written scripts
+- [x] Add `completion` subcommand: `scrutineer completion bash|zsh|fish`
+- [x] Complete subcommands, flags, and flag values (e.g. `--mode full|commits|both`)
+- [x] Dynamic completion for MR IDs where feasible (query forge for open MRs)
+- [x] Include installation instructions in `--help` output for each shell
+- [x] Consider using cobra/ff completion generation if the CLI framework supports it, otherwise hand-written scripts
 
 ## Phase 9: System prompt optimization
 
