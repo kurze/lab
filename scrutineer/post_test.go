@@ -118,6 +118,105 @@ func TestPostCommitResult(t *testing.T) {
 	})
 }
 
+func TestPostFindingsToCommits(t *testing.T) {
+	ctx := context.Background()
+	commits := []Commit{
+		{SHA: "aaaa1111bbbb2222"},
+		{SHA: "cccc3333dddd4444"},
+	}
+
+	t.Run("posts matching findings", func(t *testing.T) {
+		forge := &fakeForge{}
+		findings := []Finding{
+			{Severity: "major", Location: "main.go:10", CommitSHA: "aaaa1111bbbb2222", Category: "bug", Description: "null deref"},
+			{Severity: "critical", Location: "util.go:5", CommitSHA: "cccc3333dddd4444", Category: "security", Description: "injection"},
+		}
+		posted := postFindingsToCommits(ctx, forge, findings, commits, "test-branch", Config{})
+		if posted != 2 {
+			t.Fatalf("expected 2 posted, got %d", posted)
+		}
+		if len(forge.commitComments) != 2 {
+			t.Fatalf("expected 2 commit comments, got %d", len(forge.commitComments))
+		}
+		if forge.commitComments[0].SHA != "aaaa1111bbbb2222" {
+			t.Errorf("expected full SHA, got %s", forge.commitComments[0].SHA)
+		}
+	})
+
+	t.Run("resolves short SHA to full SHA", func(t *testing.T) {
+		forge := &fakeForge{}
+		findings := []Finding{
+			{Severity: "major", Location: "main.go:10", CommitSHA: "aaaa1111", Category: "bug", Description: "short sha"},
+		}
+		posted := postFindingsToCommits(ctx, forge, findings, commits, "test-branch", Config{})
+		if posted != 1 {
+			t.Fatalf("expected 1 posted, got %d", posted)
+		}
+		if forge.commitComments[0].SHA != "aaaa1111bbbb2222" {
+			t.Errorf("expected full SHA aaaa1111bbbb2222, got %s", forge.commitComments[0].SHA)
+		}
+	})
+
+	t.Run("skips below severity threshold", func(t *testing.T) {
+		forge := &fakeForge{}
+		findings := []Finding{
+			{Severity: "info", Location: "main.go:10", CommitSHA: "aaaa1111bbbb2222", Category: "note", Description: "fyi"},
+			{Severity: "minor", Location: "main.go:20", CommitSHA: "aaaa1111bbbb2222", Category: "style", Description: "naming"},
+			{Severity: "major", Location: "main.go:30", CommitSHA: "aaaa1111bbbb2222", Category: "bug", Description: "real bug"},
+		}
+		posted := postFindingsToCommits(ctx, forge, findings, commits, "test-branch", Config{InlineSeverity: "major"})
+		if posted != 1 {
+			t.Fatalf("expected 1 posted (only major+), got %d", posted)
+		}
+	})
+
+	t.Run("skips unknown commit SHA", func(t *testing.T) {
+		forge := &fakeForge{}
+		findings := []Finding{
+			{Severity: "major", Location: "main.go:10", CommitSHA: "deadbeef12345678", Category: "bug", Description: "unknown sha"},
+		}
+		posted := postFindingsToCommits(ctx, forge, findings, commits, "test-branch", Config{})
+		if posted != 0 {
+			t.Fatalf("expected 0 posted for unknown SHA, got %d", posted)
+		}
+	})
+
+	t.Run("skips findings without commit SHA", func(t *testing.T) {
+		forge := &fakeForge{}
+		findings := []Finding{
+			{Severity: "major", Location: "main.go:10", CommitSHA: "", Category: "bug", Description: "no sha"},
+		}
+		posted := postFindingsToCommits(ctx, forge, findings, commits, "test-branch", Config{})
+		if posted != 0 {
+			t.Fatalf("expected 0 posted for empty SHA, got %d", posted)
+		}
+	})
+
+	t.Run("skips findings without parseable location", func(t *testing.T) {
+		forge := &fakeForge{}
+		findings := []Finding{
+			{Severity: "major", Location: "", CommitSHA: "aaaa1111bbbb2222", Category: "bug", Description: "no loc"},
+			{Severity: "major", Location: "no-line", CommitSHA: "aaaa1111bbbb2222", Category: "bug", Description: "bad loc"},
+		}
+		posted := postFindingsToCommits(ctx, forge, findings, commits, "test-branch", Config{})
+		if posted != 0 {
+			t.Fatalf("expected 0 posted for unparseable locations, got %d", posted)
+		}
+	})
+
+	t.Run("default severity threshold is minor", func(t *testing.T) {
+		forge := &fakeForge{}
+		findings := []Finding{
+			{Severity: "info", Location: "main.go:10", CommitSHA: "aaaa1111bbbb2222", Category: "note", Description: "info only"},
+			{Severity: "minor", Location: "main.go:20", CommitSHA: "aaaa1111bbbb2222", Category: "style", Description: "minor issue"},
+		}
+		posted := postFindingsToCommits(ctx, forge, findings, commits, "test-branch", Config{})
+		if posted != 1 {
+			t.Fatalf("expected 1 posted (minor+ with default threshold), got %d", posted)
+		}
+	})
+}
+
 func TestPostMRResult(t *testing.T) {
 	ctx := context.Background()
 

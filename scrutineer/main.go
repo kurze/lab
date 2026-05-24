@@ -360,6 +360,11 @@ func postBranchResult(ctx context.Context, forge Forge, sr *StoredResult, key st
 		return
 	}
 
+	posted := postFindingsToCommits(ctx, forge, sr.Findings, commits, branchName, cfg)
+	logf("%s %s %d commit comment(s)", cl(ansiBold, branchName), cl(ansiGreen, "posted"), posted)
+}
+
+func postFindingsToCommits(ctx context.Context, forge Forge, findings []Finding, commits []Commit, label string, cfg Config) int {
 	shaMap := make(map[string]string, len(commits))
 	for _, c := range commits {
 		shaMap[c.SHA] = c.SHA
@@ -375,7 +380,7 @@ func postBranchResult(ctx context.Context, forge Forge, sr *StoredResult, key st
 	minRank := severityRank[strings.ToLower(minSeverity)]
 
 	posted := 0
-	for _, f := range sr.Findings {
+	for _, f := range findings {
 		if f.CommitSHA == "" {
 			continue
 		}
@@ -388,7 +393,7 @@ func postBranchResult(ctx context.Context, forge Forge, sr *StoredResult, key st
 		}
 		sha, ok := shaMap[f.CommitSHA]
 		if !ok {
-			warnf("commit %s not found on branch %s, skipping", f.CommitSHA, branchName)
+			warnf("commit %s not found on %s, skipping", f.CommitSHA, label)
 			continue
 		}
 		body := formatInlineBody(f)
@@ -398,7 +403,7 @@ func postBranchResult(ctx context.Context, forge Forge, sr *StoredResult, key st
 			posted++
 		}
 	}
-	logf("%s %s %d commit comment(s)", cl(ansiBold, branchName), cl(ansiGreen, "posted"), posted)
+	return posted
 }
 
 func postCommitResult(ctx context.Context, forge Forge, sr *StoredResult, key string, cfg Config) {
