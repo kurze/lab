@@ -157,6 +157,12 @@ func findTargetCommit(ctx context.Context, workDir string, file string) (string,
 	return sha, nil
 }
 
+func rollbackFile(ctx context.Context, workDir string, file string) {
+	cmd := exec.CommandContext(ctx, "git", "checkout", "--", file)
+	cmd.Dir = workDir
+	cmd.Run()
+}
+
 func generatePatch(ctx context.Context, llm *agentcore.LLMClient, model string, workDir string, f Finding) (string, error) {
 	file, line, _ := parseLocation(f.Location)
 
@@ -256,6 +262,7 @@ func generateFixes(ctx context.Context, llm *agentcore.LLMClient, model string, 
 			targetSHA, err = findTargetCommit(ctx, opts.WorkDir, file)
 			if err != nil {
 				logf("  %s no target commit: %v", cl(ansiRed, "✗"), err)
+				rollbackFile(ctx, opts.WorkDir, file)
 				fr.SkipReason = fmt.Sprintf("no target commit: %v", err)
 				results = append(results, fr)
 				continue
@@ -265,6 +272,7 @@ func generateFixes(ctx context.Context, llm *agentcore.LLMClient, model string, 
 		commitSHA, err := createFixupCommit(ctx, opts.WorkDir, f, targetSHA)
 		if err != nil {
 			logf("  %s commit failed: %v", cl(ansiRed, "✗"), err)
+			rollbackFile(ctx, opts.WorkDir, file)
 			fr.SkipReason = fmt.Sprintf("commit: %v", err)
 			results = append(results, fr)
 			continue
@@ -286,9 +294,12 @@ func printFixResults(results []FixResult) {
 
 	applied := 0
 	skipped := 0
+	dryRun := 0
 	for _, r := range results {
 		if r.Committed {
 			applied++
+		} else if r.Patch != "" && r.SkipReason == "" {
+			dryRun++
 		} else if r.SkipReason != "" {
 			skipped++
 		}
@@ -309,5 +320,15 @@ func printFixResults(results []FixResult) {
 	}
 
 	fmt.Fprintf(os.Stderr, "%s\n", cl(ansiDim, strings.Repeat("─", 60)))
-	fmt.Fprintf(os.Stderr, "Total: %d finding(s), %d fixed, %d skipped\n", len(results), applied, skipped)
+	parts := []string{fmt.Sprintf("%d finding(s)", len(results))}
+	if applied > 0 {
+		parts = append(parts, fmt.Sprintf("%d fixed", applied))
+	}
+	if dryRun > 0 {
+		parts = append(parts, fmt.Sprintf("%d patched (dry-run)", dryRun))
+	}
+	if skipped > 0 {
+		parts = append(parts, fmt.Sprintf("%d skipped", skipped))
+	}
+	fmt.Fprintf(os.Stderr, "Total: %s\n", strings.Join(parts, ", "))
 }
