@@ -12,16 +12,27 @@ import (
 
 type LLMClient struct {
 	url    string
+	apiKey string
 	client *http.Client
 }
 
-func NewLLMClient(url string) *LLMClient {
-	return &LLMClient{
+type ClientOption func(*LLMClient)
+
+func WithAPIKey(key string) ClientOption {
+	return func(c *LLMClient) { c.apiKey = key }
+}
+
+func NewLLMClient(url string, opts ...ClientOption) *LLMClient {
+	c := &LLMClient{
 		url: url,
 		client: &http.Client{
 			Timeout: 300 * time.Second,
 		},
 	}
+	for _, o := range opts {
+		o(c)
+	}
+	return c
 }
 
 type ChatMessage struct {
@@ -74,6 +85,9 @@ func (c *LLMClient) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, e
 		return nil, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	if c.apiKey != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
+	}
 
 	resp, err := c.client.Do(httpReq)
 	if err != nil {

@@ -82,15 +82,15 @@ Review local branches and individual commits outside of MR context, with optiona
 
 Capture all LLM request/response exchanges so they can be reviewed after the fact.
 
-- [ ] Log each LLM call (prompt, response, token counts, latency) to a structured file (JSONL or similar)
-- [ ] Include metadata: commit SHA, MR ID, review mode, timestamp
-- [ ] Store logs in a configurable directory (default: `~/.local/share/scrutineer/logs/`)
-- [ ] Add `logs` subcommand to list, inspect, and replay past exchanges
-  - [ ] `logs list` — show recent review sessions with date, MR, commit count
-  - [ ] `logs show <id>` — display the full prompt/response for a session
-  - [ ] `logs tail` — stream logs during a running review
-- [ ] Add `--verbose` / `--debug` flag to also print exchanges to stderr in real time
-- [ ] Rotate / prune old logs based on age or size (configurable)
+- [x] Log each LLM call (prompt, response, token counts, latency) to a structured file (JSONL or similar)
+- [x] Include metadata: commit SHA, MR ID, review mode, timestamp
+- [x] Store logs in a configurable directory (default: `~/.local/state/scrutineer/traces/`)
+- [x] Add `logs` subcommand to list, inspect, and replay past exchanges
+  - [x] `logs list` — show recent review sessions with date, MR, commit count
+  - [x] `logs show <id>` — display the full prompt/response for a session
+  - [x] `logs tail` — stream logs during a running review
+- [x] Add `--verbose` / `--debug` flag to also print exchanges to stderr in real time
+- [x] Rotate / prune old logs based on age or size (configurable)
 
 ## Phase 8: Shell completions
 
@@ -112,20 +112,27 @@ Improve the review quality by refining the system prompt sent to the LLM. Detail
 - [ ] Benchmark prompt changes against a set of known MRs to measure finding quality
 - [ ] Allow user-provided prompt fragments via config (e.g. project-specific review guidelines)
 
-## Phase 10: Mistral Vibe support
+## Phase 10: Agent presets and provider support
 
-Add Mistral's Vibe coding model as a first-class agent option alongside the existing LLM backend.
+Support external CLI review agents (Claude Code, Codex, Gemini, etc.) and hosted LLM providers.
 
-- [ ] Extend agentcore LLMClient (or add a new client) to support API key authentication (`Authorization: Bearer` header) — currently the client sends no auth headers, which only works for local/unauthenticated endpoints
-- [ ] Add Mistral API endpoint support — Mistral uses an OpenAI-compatible API so the request/response format should work as-is
-- [ ] Add config fields for provider selection and API key:
-  - [ ] `provider`: `"openai-compat"` (default, current behavior) or `"mistral"`
-  - [ ] `api_key`: API key string, or `REVIEW_LLM_API_KEY` env var
-  - [ ] Default URL and model for Mistral: `mistral-vibe-latest`
-- [ ] Handle Mistral-specific quirks if any (tool call format differences, token counting, rate limits)
-- [ ] Validate that tool use works correctly with Mistral Vibe (function calling support)
-- [ ] Update `config.example.toml` with a Mistral Vibe example block
-- [ ] Test with Mistral Vibe on a representative set of MRs to tune temperature and token limits
+### Agent presets
+- [x] Add `[agent]` config section with `name` and `command` fields
+- [x] Built-in presets: `claude`, `codex`, `gemini`, `vibe`, `opencode`, `pi` (extensible via `agentPresets` map)
+- [x] `CLIReviewer` implementation: sends review prompt to CLI agent, captures raw text output
+- [x] Backward compat: `review_command` still works (treated as `agent.name = "custom"`)
+- [x] Raw output passthrough: CLI agents produce free text, posted as summary comment
+- [x] `RawOutput` field on `ReviewResult` and `StoredResult` for unstructured agent output
+- [ ] Test each agent preset with a real review (verify flags and invocation)
+
+### LLM provider presets
+- [x] `WithAPIKey` option on agentcore `LLMClient` — sets `Authorization: Bearer` header
+- [x] Provider preset system: `provider = "mistral"` sets default URL + model
+- [x] Built-in presets: `lmstudio`, `ollama`, `mistral`, `openai`, `openrouter`
+- [x] Config fields: `provider`, `api_key` in `[llm]` section; `REVIEW_LLM_API_KEY` env var
+- [x] Validate agent name and provider name against known presets
+- [x] Updated `config.example.toml` with agent and provider examples
+- [ ] Test with hosted providers (Mistral, OpenRouter) on real MRs
 
 ## Phase 11: Auto-fix via fixup commits
 
@@ -153,3 +160,5 @@ Unscoped ideas for future consideration. Not yet planned or prioritized.
 - **Forge webhook / CI integration** — listen for MR events (opened, updated) and auto-trigger reviews. Makes scrutineer a proper bot. Could be a lightweight HTTP server, GitHub Action, or GitLab CI job.
 - **Finding deduplication across runs** — if the same finding (same file, line, category) was already posted in a previous review, skip it. Avoids spamming the MR with repeated comments after re-review.
 - **Confidence scoring** — have the LLM self-rate confidence on each finding. Low-confidence findings get demoted or hidden behind a flag to reduce noise.
+- **Finding categorization** — add a category field to findings (e.g. security, style, performance) and allow filtering/sorting by category in the output and comments.
+- **Comprehensive docs and examples** — a full user guide with configuration examples, troubleshooting tips, and best practices for getting the most out of scrutineer.

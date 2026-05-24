@@ -22,6 +22,7 @@ Commands:
   list      List merge/pull requests and their review status
   show      Display stored review findings
   post      Post stored review findings to the forge
+  logs      Browse and manage LLM exchange traces
 
 Run 'scrutineer <command> -h' for command-specific help.
 `)
@@ -42,6 +43,8 @@ func main() {
 		cmdShow(os.Args[2:])
 	case "post":
 		cmdPost(os.Args[2:])
+	case "logs":
+		cmdLogs(os.Args[2:])
 	case "-h", "--help", "help":
 		usage()
 	default:
@@ -162,8 +165,12 @@ func cmdShow(args []string) {
 			return
 		}
 		for _, r := range results {
-			fmt.Printf("%-20s %-6s %d finding(s)  %s  %s\n",
-				r.Key, r.Mode, len(r.Findings), formatAge(r.ReviewedAt), r.Title)
+			count := fmt.Sprintf("%d finding(s)", len(r.Findings))
+			if r.RawOutput != "" {
+				count = "raw output"
+			}
+			fmt.Printf("%-20s %-6s %-14s %s  %s\n",
+				r.Key, r.Mode, count, formatAge(r.ReviewedAt), r.Title)
 		}
 		return
 	}
@@ -172,6 +179,10 @@ func cmdShow(args []string) {
 		r := state.GetResult(cfg.Project, key)
 		if r == nil {
 			fmt.Fprintf(os.Stderr, "no stored result for %s\n", key)
+			continue
+		}
+		if r.RawOutput != "" {
+			fmt.Printf("--- %s: %s (raw output, mode: %s) ---\n%s\n\n", r.Key, r.Title, r.Mode, r.RawOutput)
 			continue
 		}
 		fmt.Printf("--- %s: %s (%d finding(s), mode: %s) ---\n", r.Key, r.Title, len(r.Findings), r.Mode)
@@ -273,11 +284,17 @@ func cmdPost(args []string) {
 			continue
 		}
 
-		result := &ReviewResult{Findings: sr.Findings, Model: sr.Model}
-		comment := FormatComment(result, pr.Title)
+		result := &ReviewResult{Findings: sr.Findings, RawOutput: sr.RawOutput, Model: sr.Model}
 
-		postInline := (style == "inline" || style == "both") && len(result.Findings) > 0
-		postSummary := style == "summary" || style == "both"
+		var comment string
+		if result.RawOutput != "" {
+			comment = result.RawOutput
+		} else {
+			comment = FormatComment(result, pr.Title)
+		}
+
+		postInline := result.RawOutput == "" && (style == "inline" || style == "both") && len(result.Findings) > 0
+		postSummary := style == "summary" || style == "both" || result.RawOutput != ""
 
 		if postInline {
 			inlineComments, _ := routeFindings(result.Findings, cfg.InlineSeverity)
@@ -329,9 +346,18 @@ func cmdReview(args []string) {
 	comments := fs.String("comments", "", "comment style: summary, inline, or both")
 	branch := fs.String("branch", "", "review a local branch (commits since base branch)")
 	commitSHA := fs.String("commit", "", "review a single commit by SHA")
+	agent := fs.String("agent", "", "review agent: builtin, claude, codex, gemini, vibe, opencode, pi, custom")
+	model := fs.String("model", "", "LLM model (overrides config)")
+	verbose := fs.Bool("verbose", false, "print LLM exchanges to stderr in real time")
 	fs.Parse(args)
 
 	cfg := loadConfig(*configPath)
+	if *agent != "" {
+		cfg.Agent.Name = *agent
+	}
+	if *model != "" {
+		cfg.LLM.Model = *model
+	}
 	if *project != "" {
 		cfg.Project = *project
 	}
@@ -339,6 +365,7 @@ func cmdReview(args []string) {
 		cfg.RepoPath = *repoPath
 	}
 	cfg.DryRun = !*post
+	cfg.Verbose = *verbose
 	if *mode != "" {
 		cfg.ReviewMode = *mode
 	}
@@ -346,14 +373,16 @@ func cmdReview(args []string) {
 		cfg.CommentStyle = *comments
 	}
 
+	go pruneTraces(resolveTracesDir(cfg), cfg.LogMaxAgeDays, cfg.LogMaxSizeMB)
+
 	state, err := LoadState("")
 	if err != nil {
 		log.Fatalf("state: %v", err)
 	}
 
 	if *branch != "" {
-		if cfg.ReviewCommand == "" && cfg.LLM.URL == "" {
-			fmt.Fprintf(os.Stderr, "error: review engine required: set review_command or [llm] url in config\n")
+		if err := validateReviewEngine(cfg); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			os.Exit(1)
 		}
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -365,8 +394,8 @@ func cmdReview(args []string) {
 	}
 
 	if *commitSHA != "" {
-		if cfg.ReviewCommand == "" && cfg.LLM.URL == "" {
-			fmt.Fprintf(os.Stderr, "error: review engine required: set review_command or [llm] url in config\n")
+		if err := validateReviewEngine(cfg); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			os.Exit(1)
 		}
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -449,7 +478,7 @@ func runBranch(ctx context.Context, cfg Config, state *State, branchName string)
 		if mode == "both" {
 			var digest string
 			if llmr, ok := reviewer.(*LLMReviewer); ok {
-				digest, _ = digestFindings(ctx, llmr.LLM, llmr.Model, commitResults)
+				digest, _ = digestFindings(ctx, llmr.LLM, llmr.Model, commitResults, nil)
 			} else {
 				digest = digestFindingsPlain(commitResults)
 			}
@@ -491,6 +520,7 @@ func runBranch(ctx context.Context, cfg Config, state *State, branchName string)
 		Title:      pr.Title,
 		Mode:       mode,
 		Findings:   result.Findings,
+		RawOutput:  result.RawOutput,
 		Model:      result.Model,
 		ReviewedAt: time.Now(),
 	})
@@ -498,9 +528,13 @@ func runBranch(ctx context.Context, cfg Config, state *State, branchName string)
 		warnf("save state: %v", err)
 	}
 
-	fmt.Printf("--- %s (%d finding(s)) ---\n%s\n", branchName, len(result.Findings), comment)
+	if result.RawOutput != "" {
+		fmt.Printf("--- %s (raw output) ---\n%s\n", branchName, result.RawOutput)
+	} else {
+		fmt.Printf("--- %s (%d finding(s)) ---\n%s\n", branchName, len(result.Findings), comment)
+	}
 
-	if !cfg.DryRun && len(result.Findings) > 0 {
+	if !cfg.DryRun && result.RawOutput == "" && len(result.Findings) > 0 {
 		if err := cfg.ValidateForge(); err == nil {
 			forge, fErr := NewForge(cfg)
 			if fErr == nil {
@@ -568,6 +602,7 @@ func runCommit(ctx context.Context, cfg Config, state *State, sha string) error 
 		Title:      fmt.Sprintf("commit %s", shortSHA),
 		Mode:       "full",
 		Findings:   result.Findings,
+		RawOutput:  result.RawOutput,
 		Model:      result.Model,
 		ReviewedAt: time.Now(),
 	})
@@ -575,10 +610,14 @@ func runCommit(ctx context.Context, cfg Config, state *State, sha string) error 
 		warnf("save state: %v", err)
 	}
 
-	comment := FormatComment(result, fmt.Sprintf("commit %s", shortSHA))
-	fmt.Printf("--- commit %s (%d finding(s)) ---\n%s\n", shortSHA, len(result.Findings), comment)
+	if result.RawOutput != "" {
+		fmt.Printf("--- commit %s (raw output) ---\n%s\n", shortSHA, result.RawOutput)
+	} else {
+		comment := FormatComment(result, fmt.Sprintf("commit %s", shortSHA))
+		fmt.Printf("--- commit %s (%d finding(s)) ---\n%s\n", shortSHA, len(result.Findings), comment)
+	}
 
-	if !cfg.DryRun && len(result.Findings) > 0 {
+	if !cfg.DryRun && result.RawOutput == "" && len(result.Findings) > 0 {
 		forge, fErr := NewForge(cfg)
 		if fErr != nil {
 			return fmt.Errorf("forge: %w", fErr)
@@ -622,24 +661,80 @@ func cliProgress(prefix string) ProgressFunc {
 	}
 }
 
-func newReviewer(cfg Config) Reviewer {
-	if cfg.ReviewCommand != "" {
-		return &CommandReviewer{Command: cfg.ReviewCommand, Agent: cfg.ReviewAgent}
+func validateReviewEngine(cfg Config) error {
+	agent := resolveAgent(cfg)
+	switch agent {
+	case "builtin":
+		if cfg.LLM.URL == "" {
+			return fmt.Errorf("builtin agent requires [llm] url (or set provider)")
+		}
+	case "custom":
+		cmd := cfg.Agent.Command
+		if cmd == "" {
+			cmd = cfg.ReviewCommand
+		}
+		if cmd == "" {
+			return fmt.Errorf("custom agent requires agent.command or review_command")
+		}
+	default:
+		if _, ok := agentPresets[agent]; !ok {
+			return fmt.Errorf("unknown agent %q", agent)
+		}
 	}
-	return &LLMReviewer{
-		LLM:          agentcore.NewLLMClient(cfg.LLM.URL),
-		Model:        cfg.LLM.Model,
-		ContextSize:  cfg.LLM.ContextSize,
-		TokenCeiling: cfg.LLM.TokenCeiling,
-		Temperature:  cfg.LLM.Temperature,
+	return nil
+}
+
+func newReviewer(cfg Config) Reviewer {
+	agent := resolveAgent(cfg)
+
+	switch agent {
+	case "builtin":
+		var opts []agentcore.ClientOption
+		if cfg.LLM.APIKey != "" {
+			opts = append(opts, agentcore.WithAPIKey(cfg.LLM.APIKey))
+		}
+		return &LLMReviewer{
+			LLM:          agentcore.NewLLMClient(cfg.LLM.URL, opts...),
+			Model:        cfg.LLM.Model,
+			ContextSize:  cfg.LLM.ContextSize,
+			TokenCeiling: cfg.LLM.TokenCeiling,
+			Temperature:  cfg.LLM.Temperature,
+			TraceDir:     cfg.LogDir,
+			Verbose:      cfg.Verbose,
+		}
+	case "custom":
+		cmd := cfg.Agent.Command
+		if cmd == "" {
+			cmd = cfg.ReviewCommand
+		}
+		label := cfg.ReviewAgent
+		if label == "" {
+			label = "custom"
+		}
+		return &CommandReviewer{Command: cmd, Agent: label}
+	default:
+		preset := agentPresets[agent]
+		label := cfg.ReviewAgent
+		if label == "" {
+			label = agent
+		}
+		return &CLIReviewer{
+			Command: preset.Command,
+			Args:    preset.Args,
+			Agent:   label,
+		}
 	}
 }
 
 func setReviewerMeta(r Reviewer, meta map[string]string) {
 	if llmr, ok := r.(*LLMReviewer); ok {
+		llmr.mu.Lock()
 		llmr.TraceMeta = meta
+		llmr.mu.Unlock()
 	}
 }
+
+
 
 type MRTarget struct {
 	ID   int64
@@ -847,7 +942,7 @@ func run(ctx context.Context, cfg Config, state *State, targets []MRTarget) erro
 
 			var digest string
 			if llmr, ok := reviewer.(*LLMReviewer); ok {
-				digest, err = digestFindings(ctx, llmr.LLM, llmr.Model, commitResults)
+				digest, err = digestFindings(ctx, llmr.LLM, llmr.Model, commitResults, nil)
 				if err != nil {
 					warnf("#%d: digest failed, using plain fallback: %v", pr.ID, err)
 					digest = digestFindingsPlain(commitResults)
@@ -911,13 +1006,17 @@ func run(ctx context.Context, cfg Config, state *State, targets []MRTarget) erro
 			comment = FormatComment(result, pr.Title)
 		}
 
+		if result.RawOutput != "" {
+			comment = result.RawOutput
+		}
+
 		style := cfg.CommentStyle
 		if style == "" {
 			style = "both"
 		}
 
-		postInline := (style == "inline" || style == "both") && len(result.Findings) > 0
-		postSummary := style == "summary" || style == "both"
+		postInline := result.RawOutput == "" && (style == "inline" || style == "both") && len(result.Findings) > 0
+		postSummary := style == "summary" || style == "both" || result.RawOutput != ""
 
 		s := mrSummary{
 			ID:       pr.ID,
@@ -983,6 +1082,7 @@ func run(ctx context.Context, cfg Config, state *State, targets []MRTarget) erro
 			Title:      pr.Title,
 			Mode:       reviewMode,
 			Findings:   result.Findings,
+			RawOutput:  result.RawOutput,
 			Model:      result.Model,
 			ReviewedAt: time.Now(),
 		})
