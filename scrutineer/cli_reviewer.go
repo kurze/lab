@@ -46,8 +46,6 @@ func (r *CLIReviewer) execute(ctx context.Context, workDir string, prompt string
 	return &ReviewResult{RawOutput: output, Model: r.Agent}, nil
 }
 
-var fence = "```"
-
 func buildCLIReviewPrompt(diff string, mode string) string {
 	scope := "commit"
 	if mode == "full" {
