@@ -911,6 +911,11 @@ func validateReviewEngine(cfg Config) error {
 			return fmt.Errorf("unknown agent %q", agent)
 		}
 	}
+	switch cfg.FixThreshold {
+	case "", "info", "minor", "major", "critical":
+	default:
+		return fmt.Errorf("invalid fix_threshold %q (valid: info, minor, major, critical)", cfg.FixThreshold)
+	}
 	return nil
 }
 
@@ -966,14 +971,14 @@ func setReviewerMeta(r Reviewer, meta map[string]string) {
 
 
 
-func tryGenerateFixes(ctx context.Context, cfg Config, reviewer Reviewer, findings []Finding, workDir string, label string) {
+func tryGenerateFixes(ctx context.Context, cfg Config, reviewer Reviewer, findings []Finding, workDir string, label string) bool {
 	if (!cfg.Fix && !cfg.FixDryRun) || len(findings) == 0 {
-		return
+		return false
 	}
 	llmr, ok := reviewer.(*LLMReviewer)
 	if !ok {
 		warnf("--fix requires builtin agent")
-		return
+		return false
 	}
 	results, err := generateFixes(ctx, llmr.LLM, llmr.Model, findings, FixOptions{
 		DryRun:    cfg.FixDryRun,
@@ -982,9 +987,15 @@ func tryGenerateFixes(ctx context.Context, cfg Config, reviewer Reviewer, findin
 	})
 	if err != nil {
 		warnf("%s fix generation failed: %v", label, err)
-		return
+		return false
 	}
 	printFixResults(results)
+	for _, r := range results {
+		if r.Committed {
+			return true
+		}
+	}
+	return false
 }
 
 type MRTarget struct {
@@ -1257,10 +1268,15 @@ func run(ctx context.Context, cfg Config, state *State, targets []MRTarget) erro
 			comment = FormatComment(result, pr.Title)
 		}
 
+		hasFixups := false
 		if result.RawOutput == "" {
-			tryGenerateFixes(ctx, cfg, reviewer, result.Findings, worktreeDir, fmt.Sprintf("#%d", pr.ID))
+			hasFixups = tryGenerateFixes(ctx, cfg, reviewer, result.Findings, worktreeDir, fmt.Sprintf("#%d", pr.ID))
 		}
-		cleanup()
+		if hasFixups {
+			logf("%s fixup commits in worktree: %s", cl(ansiBold, fmt.Sprintf("#%d", pr.ID)), worktreeDir)
+		} else {
+			cleanup()
+		}
 
 		if result.RawOutput != "" {
 			comment = result.RawOutput
