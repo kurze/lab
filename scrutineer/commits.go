@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -136,11 +137,18 @@ func reviewByCommits(ctx context.Context, reviewer Reviewer, worktreeDir string,
 				})
 			}
 
+			wtDir, wtCleanup, wtErr := createWorktree(worktreeDir, item.commit.SHA)
+			if wtErr != nil {
+				errf("  commit %s worktree failed: %v", item.sha, wtErr)
+				return
+			}
+			defer wtCleanup()
+
 			taggedDiff := fmt.Sprintf("Commit: %s — %s\n\n%s", item.sha, item.msg, item.diff)
 			if isFixupCommit(item.commit.Message) {
 				taggedDiff = fmt.Sprintf("Commit: %s — %s\n[NOTE: This is a fixup/squash commit. Focus on correctness of the fix, not style.]\n\n%s", item.sha, item.msg, item.diff)
 			}
-			result, err := reviewer.Review(ctx, worktreeDir, taggedDiff)
+			result, err := reviewer.Review(ctx, wtDir, taggedDiff)
 			if err != nil {
 				errf("  commit %s review failed: %v", item.sha, err)
 				if opts != nil && opts.OnProgress != nil {
@@ -190,6 +198,25 @@ func reviewByCommits(ctx context.Context, reviewer Reviewer, worktreeDir string,
 	}
 
 	return collected, nil
+}
+
+func createWorktree(repoDir, sha string) (string, func(), error) {
+	dir, err := os.MkdirTemp("", "scrutineer-wt-*")
+	if err != nil {
+		return "", nil, fmt.Errorf("mkdtemp: %w", err)
+	}
+	cleanup := func() {
+		exec.Command("git", "-C", repoDir, "worktree", "remove", "--force", dir).Run()
+		os.RemoveAll(dir)
+	}
+
+	cmd := exec.Command("git", "worktree", "add", "--detach", dir, sha)
+	cmd.Dir = repoDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		cleanup()
+		return "", nil, fmt.Errorf("git worktree add: %s", strings.TrimSpace(string(out)))
+	}
+	return dir, cleanup, nil
 }
 
 func commitDiff(worktreeDir, sha string) (string, error) {
