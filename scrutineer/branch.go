@@ -7,18 +7,49 @@ import (
 )
 
 func detectBaseBranch(repoPath string) string {
-	for _, name := range []string{"main", "master"} {
-		cmd := exec.Command("git", "rev-parse", "--verify", name)
-		cmd.Dir = repoPath
-		if err := cmd.Run(); err == nil {
+	// Try the remote HEAD first (most reliable for non-standard default branches).
+	cmd := exec.Command("git", "symbolic-ref", "refs/remotes/origin/HEAD")
+	cmd.Dir = repoPath
+	if out, err := cmd.Output(); err == nil {
+		ref := strings.TrimSpace(string(out))
+		// "refs/remotes/origin/integration" → "origin/integration"
+		if short := strings.TrimPrefix(ref, "refs/remotes/"); short != ref {
+			return short
+		}
+	}
+
+	for _, name := range []string{"main", "master", "origin/main", "origin/master"} {
+		if resolveRef(repoPath, name) {
 			return name
 		}
 	}
 	return "main"
 }
 
+func resolveRef(repoPath, ref string) bool {
+	cmd := exec.Command("git", "rev-parse", "--verify", ref)
+	cmd.Dir = repoPath
+	return cmd.Run() == nil
+}
+
+func resolveBranch(repoPath, branchName string) (string, error) {
+	if resolveRef(repoPath, branchName) {
+		return branchName, nil
+	}
+	remote := "origin/" + branchName
+	if resolveRef(repoPath, remote) {
+		return remote, nil
+	}
+	return "", fmt.Errorf("branch %q not found (tried %q and %q)", branchName, branchName, remote)
+}
+
 func branchCommits(repoPath, branchName, baseBranch string) ([]Commit, error) {
-	cmd := exec.Command("git", "log", "--format=%H\t%an\t%s", baseBranch+".."+branchName)
+	ref, err := resolveBranch(repoPath, branchName)
+	if err != nil {
+		return nil, err
+	}
+
+	cmd := exec.Command("git", "log", "--format=%H\t%an\t%s", baseBranch+".."+ref)
 	cmd.Dir = repoPath
 	out, err := cmd.Output()
 	if err != nil {
@@ -46,7 +77,12 @@ func branchCommits(repoPath, branchName, baseBranch string) ([]Commit, error) {
 }
 
 func branchDiff(repoPath, branchName, baseBranch string) (string, error) {
-	cmd := exec.Command("git", "diff", baseBranch+"..."+branchName)
+	ref, err := resolveBranch(repoPath, branchName)
+	if err != nil {
+		return "", err
+	}
+
+	cmd := exec.Command("git", "diff", baseBranch+"..."+ref)
 	cmd.Dir = repoPath
 	out, err := cmd.Output()
 	if err != nil {

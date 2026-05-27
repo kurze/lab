@@ -459,6 +459,7 @@ func cmdReview(args []string) {
 	comments := fs.String("comments", "", "comment style: summary, inline, or both")
 	branch := fs.String("branch", "", "review a local branch (commits since base branch)")
 	commitSHA := fs.String("commit", "", "review a single commit by SHA")
+	base := fs.String("base", "", "base branch for -branch review (default: auto-detect)")
 	agent := fs.String("agent", "", "review agent: builtin, claude, codex, gemini, vibe, opencode, pi, custom")
 	model := fs.String("model", "", "LLM model (overrides config)")
 	verbose := fs.Bool("verbose", false, "print LLM exchanges to stderr in real time")
@@ -500,7 +501,7 @@ func cmdReview(args []string) {
 		}
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 		defer cancel()
-		if err := runBranch(ctx, cfg, state, *branch); err != nil {
+		if err := runBranch(ctx, cfg, state, *branch, *base); err != nil {
 			log.Fatalf("error: %v", err)
 		}
 		return
@@ -544,8 +545,11 @@ func cmdReview(args []string) {
 	os.Exit(1)
 }
 
-func runBranch(ctx context.Context, cfg Config, state *State, branchName string) error {
-	baseBranch := detectBaseBranch(cfg.RepoPath)
+func runBranch(ctx context.Context, cfg Config, state *State, branchName, baseBranchOverride string) error {
+	baseBranch := baseBranchOverride
+	if baseBranch == "" {
+		baseBranch = detectBaseBranch(cfg.RepoPath)
+	}
 	reviewer := newReviewer(cfg)
 
 	commits, err := branchCommits(cfg.RepoPath, branchName, baseBranch)
