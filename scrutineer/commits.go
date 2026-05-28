@@ -266,6 +266,10 @@ func mergeCommitResults(crs []CommitReviewResult) *ReviewResult {
 			merged.Model = cr.Result.Model
 		}
 		merged.TokensUsed += cr.Result.TokensUsed
+		merged.GeneratedTokens += cr.Result.GeneratedTokens
+		if cr.Result.PeakContextTokens > merged.PeakContextTokens {
+			merged.PeakContextTokens = cr.Result.PeakContextTokens
+		}
 		sha := cr.Commit.SHA
 		if len(sha) > 8 {
 			sha = sha[:8]
