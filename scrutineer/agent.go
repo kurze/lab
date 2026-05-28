@@ -98,16 +98,18 @@ func (r *LLMReviewer) review(ctx context.Context, workDir string, diff string, f
 
 	reviewText := lr.FinalMessage.Content
 	if lr.Truncated || reviewText == "" {
-		return &ReviewResult{Findings: []Finding{}, Model: r.Model, TokensUsed: lr.TokensUsed}, nil
+		return &ReviewResult{Findings: []Finding{}, Model: r.Model, TokensUsed: lr.TokensUsed, GeneratedTokens: lr.GeneratedTokens, PeakContextTokens: lr.PeakContextTokens}, nil
 	}
 
 	result, err := r.extractFindings(ctx, reviewText, lr.Tracer)
 	if err != nil {
 		warnf("extraction failed, returning empty findings: %v", err)
-		return &ReviewResult{Findings: []Finding{}, Model: r.Model, TokensUsed: lr.TokensUsed}, nil
+		return &ReviewResult{Findings: []Finding{}, Model: r.Model, TokensUsed: lr.TokensUsed, GeneratedTokens: lr.GeneratedTokens, PeakContextTokens: lr.PeakContextTokens}, nil
 	}
 	result.Model = r.Model
 	result.TokensUsed = lr.TokensUsed
+	result.GeneratedTokens = lr.GeneratedTokens
+	result.PeakContextTokens = lr.PeakContextTokens
 	return result, nil
 }
 
@@ -161,16 +163,18 @@ func (r *LLMReviewer) ReviewWithContext(ctx context.Context, workDir string, dif
 
 	reviewText := lr.FinalMessage.Content
 	if lr.Truncated || reviewText == "" {
-		return &ReviewResult{Findings: []Finding{}, Model: r.Model, TokensUsed: lr.TokensUsed}, nil
+		return &ReviewResult{Findings: []Finding{}, Model: r.Model, TokensUsed: lr.TokensUsed, GeneratedTokens: lr.GeneratedTokens, PeakContextTokens: lr.PeakContextTokens}, nil
 	}
 
 	result, err := r.extractFindings(ctx, reviewText, lr.Tracer)
 	if err != nil {
 		warnf("extraction failed, returning empty findings: %v", err)
-		return &ReviewResult{Findings: []Finding{}, Model: r.Model, TokensUsed: lr.TokensUsed}, nil
+		return &ReviewResult{Findings: []Finding{}, Model: r.Model, TokensUsed: lr.TokensUsed, GeneratedTokens: lr.GeneratedTokens, PeakContextTokens: lr.PeakContextTokens}, nil
 	}
 	result.Model = r.Model
 	result.TokensUsed = lr.TokensUsed
+	result.GeneratedTokens = lr.GeneratedTokens
+	result.PeakContextTokens = lr.PeakContextTokens
 	return result, nil
 }
 

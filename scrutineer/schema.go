@@ -10,10 +10,12 @@ type Finding struct {
 }
 
 type ReviewResult struct {
-	Findings   []Finding `json:"findings"`
-	RawOutput  string    `json:"raw_output"`
-	Model      string    `json:"-"`
-	TokensUsed int       `json:"-"`
+	Findings          []Finding `json:"findings"`
+	RawOutput         string    `json:"raw_output"`
+	Model             string    `json:"-"`
+	TokensUsed        int       `json:"-"`
+	GeneratedTokens   int       `json:"-"`
+	PeakContextTokens int       `json:"-"`
 }
 
 type CommitReviewResult struct {
