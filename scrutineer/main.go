@@ -81,7 +81,7 @@ func cmdList(args []string) {
 		os.Exit(1)
 	}
 
-	state, err := LoadState("")
+	state, err := LoadStorage("")
 	if err != nil {
 		log.Fatalf("state: %v", err)
 	}
@@ -152,7 +152,7 @@ func cmdShow(args []string) {
 		cfg.Project = *project
 	}
 
-	state, err := LoadState("")
+	state, err := LoadStorage("")
 	if err != nil {
 		log.Fatalf("state: %v", err)
 	}
@@ -242,7 +242,7 @@ func cmdPost(args []string) {
 		os.Exit(1)
 	}
 
-	state, err := LoadState("")
+	state, err := LoadStorage("")
 	if err != nil {
 		log.Fatalf("state: %v", err)
 	}
@@ -336,7 +336,7 @@ func cmdFix(args []string) {
 		os.Exit(1)
 	}
 
-	state, err := LoadState("")
+	state, err := LoadStorage("")
 	if err != nil {
 		log.Fatalf("state: %v", err)
 	}
@@ -595,7 +595,7 @@ func cmdReview(args []string) {
 
 	go pruneTraces(resolveTracesDir(cfg), cfg.LogMaxAgeDays, cfg.LogMaxSizeMB)
 
-	state, err := LoadState("")
+	state, err := LoadStorage("")
 	if err != nil {
 		log.Fatalf("state: %v", err)
 	}
@@ -651,7 +651,7 @@ func cmdReview(args []string) {
 	os.Exit(1)
 }
 
-func runBranch(ctx context.Context, cfg Config, state *State, branchName, baseBranchOverride string) error {
+func runBranch(ctx context.Context, cfg Config, state Storage, branchName, baseBranchOverride string) error {
 	baseBranch := baseBranchOverride
 	if baseBranch == "" {
 		baseBranch = detectBaseBranch(cfg.RepoPath)
@@ -824,7 +824,7 @@ func runBranch(ctx context.Context, cfg Config, state *State, branchName, baseBr
 	return nil
 }
 
-func runCommit(ctx context.Context, cfg Config, state *State, sha string) error {
+func runCommit(ctx context.Context, cfg Config, state Storage, sha string) error {
 	reviewer := newReviewer(cfg)
 	setReviewerMeta(reviewer, map[string]string{
 		"commit":  sha,
@@ -1139,7 +1139,7 @@ func printSummaryTable(summaries []mrSummary, totalDuration time.Duration) {
 		len(summaries), formatTokens(totalGenerated), formatTokens(totalPeakCtx), totalDuration.Round(time.Second))
 }
 
-func run(ctx context.Context, cfg Config, state *State, targets []MRTarget) error {
+func run(ctx context.Context, cfg Config, state Storage, targets []MRTarget) error {
 	forge, err := NewForge(cfg)
 	if err != nil {
 		return fmt.Errorf("%s forge client: %w", cfg.ForgeType, err)
