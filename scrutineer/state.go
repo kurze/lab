@@ -148,8 +148,8 @@ func (s *State) ListResults(project string) []*StoredResult {
 }
 
 func (s *State) Save() error {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
 		return fmt.Errorf("create state dir: %w", err)
 	}
