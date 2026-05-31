@@ -20,10 +20,10 @@ type StoredResult struct {
 }
 
 type State struct {
-	Reviewed        map[string]map[string]time.Time          `json:"reviewed"`
-	ReviewedCommits map[string]map[string]time.Time          `json:"reviewed_commits,omitempty"`
-	Results         map[string]map[string]*StoredResult      `json:"results,omitempty"`
-	mu              sync.Mutex                               `json:"-"`
+	Reviewed        map[string]map[string]time.Time     `json:"reviewed"`
+	ReviewedCommits map[string]map[string]time.Time     `json:"reviewed_commits,omitempty"`
+	Results         map[string]map[string]*StoredResult `json:"results,omitempty"`
+	mu              sync.RWMutex                        `json:"-"`
 	path            string
 }
 
@@ -59,6 +59,8 @@ func LoadState(path string) (*State, error) {
 }
 
 func (s *State) IsReviewed(project string, id int64) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	proj, ok := s.Reviewed[project]
 	if !ok {
 		return false
@@ -68,6 +70,8 @@ func (s *State) IsReviewed(project string, id int64) bool {
 }
 
 func (s *State) MarkReviewed(project string, id int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.Reviewed[project] == nil {
 		s.Reviewed[project] = make(map[string]time.Time)
 	}
@@ -75,8 +79,8 @@ func (s *State) MarkReviewed(project string, id int64) {
 }
 
 func (s *State) IsCommitReviewed(project, sha string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	proj, ok := s.ReviewedCommits[project]
 	if !ok {
 		return false
@@ -97,21 +101,25 @@ func (s *State) MarkCommitReviewed(project, sha string) {
 	s.ReviewedCommits[project][sha] = time.Now()
 }
 
-func ResultKeyMR(id int64) string       { return fmt.Sprintf("mr:%d", id) }
+func ResultKeyMR(id int64) string        { return fmt.Sprintf("mr:%d", id) }
 func ResultKeyBranch(name string) string { return "branch:" + name }
 func ResultKeyCommit(sha string) string  { return "commit:" + sha }
 
 func (s *State) StoreResult(project string, sr *StoredResult) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.Results == nil {
 		s.Results = make(map[string]map[string]*StoredResult)
 	}
 	if s.Results[project] == nil {
 		s.Results[project] = make(map[string]*StoredResult)
 	}
-	s.Results[project][sr.Key] = sr
+	s.Results[project][sr.Key] = cloneStoredResult(sr)
 }
 
 func (s *State) GetResult(project, key string) *StoredResult {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	if s.Results == nil {
 		return nil
 	}
@@ -119,10 +127,12 @@ func (s *State) GetResult(project, key string) *StoredResult {
 	if !ok {
 		return nil
 	}
-	return proj[key]
+	return cloneStoredResult(proj[key])
 }
 
 func (s *State) ListResults(project string) []*StoredResult {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	if s.Results == nil {
 		return nil
 	}
@@ -132,12 +142,14 @@ func (s *State) ListResults(project string) []*StoredResult {
 	}
 	results := make([]*StoredResult, 0, len(proj))
 	for _, r := range proj {
-		results = append(results, r)
+		results = append(results, cloneStoredResult(r))
 	}
 	return results
 }
 
 func (s *State) Save() error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
 		return fmt.Errorf("create state dir: %w", err)
 	}
@@ -146,4 +158,15 @@ func (s *State) Save() error {
 		return fmt.Errorf("marshal state: %w", err)
 	}
 	return os.WriteFile(s.path, data, 0o644)
+}
+
+func cloneStoredResult(sr *StoredResult) *StoredResult {
+	if sr == nil {
+		return nil
+	}
+	clone := *sr
+	if len(sr.Findings) > 0 {
+		clone.Findings = append([]Finding(nil), sr.Findings...)
+	}
+	return &clone
 }
