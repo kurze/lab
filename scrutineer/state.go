@@ -148,16 +148,15 @@ func (s *State) ListResults(project string) []*StoredResult {
 }
 
 func (s *State) Save() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
+	path, snap := s.snapshot()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("create state dir: %w", err)
 	}
-	data, err := json.MarshalIndent(s, "", "  ")
+	data, err := json.MarshalIndent(snap, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal state: %w", err)
 	}
-	return os.WriteFile(s.path, data, 0o644)
+	return os.WriteFile(path, data, 0o644)
 }
 
 func cloneStoredResult(sr *StoredResult) *StoredResult {
@@ -169,4 +168,42 @@ func cloneStoredResult(sr *StoredResult) *StoredResult {
 		clone.Findings = append([]Finding(nil), sr.Findings...)
 	}
 	return &clone
+}
+
+func (s *State) snapshot() (string, *State) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	reviewed := make(map[string]map[string]time.Time, len(s.Reviewed))
+	for project, entries := range s.Reviewed {
+		projectEntries := make(map[string]time.Time, len(entries))
+		for key, value := range entries {
+			projectEntries[key] = value
+		}
+		reviewed[project] = projectEntries
+	}
+
+	reviewedCommits := make(map[string]map[string]time.Time, len(s.ReviewedCommits))
+	for project, entries := range s.ReviewedCommits {
+		projectEntries := make(map[string]time.Time, len(entries))
+		for key, value := range entries {
+			projectEntries[key] = value
+		}
+		reviewedCommits[project] = projectEntries
+	}
+
+	results := make(map[string]map[string]*StoredResult, len(s.Results))
+	for project, entries := range s.Results {
+		projectEntries := make(map[string]*StoredResult, len(entries))
+		for key, value := range entries {
+			projectEntries[key] = cloneStoredResult(value)
+		}
+		results[project] = projectEntries
+	}
+
+	return s.path, &State{
+		Reviewed:        reviewed,
+		ReviewedCommits: reviewedCommits,
+		Results:         results,
+	}
 }
