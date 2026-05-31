@@ -150,3 +150,74 @@ func TestStateLoadCorrupt(t *testing.T) {
 		t.Error("expected error on corrupt state file")
 	}
 }
+
+func TestLoadStorage(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	store, err := LoadStorage(path)
+	if err != nil {
+		t.Fatalf("LoadStorage: %v", err)
+	}
+
+	store.MarkReviewed("owner/repo", 42)
+	if !store.IsReviewed("owner/repo", 42) {
+		t.Fatal("expected reviewed MR to be stored")
+	}
+}
+
+func TestStoredResultsAreDefensivelyCopied(t *testing.T) {
+	s, err := LoadState(filepath.Join(t.TempDir(), "state.json"))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+
+	original := &StoredResult{
+		Key:        ResultKeyMR(42),
+		Title:      "Original title",
+		Mode:       "full",
+		Findings:   []Finding{{Category: "security", Severity: "major", Description: "A"}},
+		ReviewedAt: time.Now(),
+	}
+	s.StoreResult("owner/repo", original)
+
+	original.Title = "Mutated by caller"
+	original.Findings[0].Description = "Mutated finding"
+
+	got := s.GetResult("owner/repo", ResultKeyMR(42))
+	if got == nil {
+		t.Fatal("expected stored result")
+	}
+	if got.Title != "Original title" {
+		t.Fatalf("title mutated through caller reference: got %q", got.Title)
+	}
+	if got.Findings[0].Description != "A" {
+		t.Fatalf("findings mutated through caller reference: got %q", got.Findings[0].Description)
+	}
+
+	got.Title = "Mutated from getter"
+	got.Findings[0].Description = "Mutated from getter"
+
+	again := s.GetResult("owner/repo", ResultKeyMR(42))
+	if again == nil {
+		t.Fatal("expected stored result on second read")
+	}
+	if again.Title != "Original title" {
+		t.Fatalf("title mutated through getter result: got %q", again.Title)
+	}
+	if again.Findings[0].Description != "A" {
+		t.Fatalf("finding mutated through getter result: got %q", again.Findings[0].Description)
+	}
+
+	listed := s.ListResults("owner/repo")
+	if len(listed) != 1 {
+		t.Fatalf("expected one listed result, got %d", len(listed))
+	}
+	listed[0].Title = "Mutated from list"
+
+	final := s.GetResult("owner/repo", ResultKeyMR(42))
+	if final == nil {
+		t.Fatal("expected stored result after list mutation")
+	}
+	if final.Title != "Original title" {
+		t.Fatalf("title mutated through list result: got %q", final.Title)
+	}
+}
