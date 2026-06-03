@@ -5,7 +5,7 @@ go 1.25.1
 require (
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
-	github.com/quic-go/quic-go v0.59.0
+	github.com/quic-go/quic-go v0.59.1
 	github.com/quic-go/webtransport-go v0.10.0
 )
 
