@@ -119,6 +119,36 @@ func ParseRemoteURL(raw string) RemoteInfo {
 	}
 }
 
+func (r RemoteInfo) CommitURL(sha string) string {
+	if r.BaseURL == "" || r.Project == "" {
+		return ""
+	}
+	if r.ForgeType == "github" {
+		return fmt.Sprintf("%s/%s/commit/%s", r.BaseURL, r.Project, sha)
+	}
+	return fmt.Sprintf("%s/%s/-/commit/%s", r.BaseURL, r.Project, sha)
+}
+
+func (r RemoteInfo) MRURL(id int64) string {
+	if r.BaseURL == "" || r.Project == "" {
+		return ""
+	}
+	if r.ForgeType == "github" {
+		return fmt.Sprintf("%s/%s/pull/%d", r.BaseURL, r.Project, id)
+	}
+	return fmt.Sprintf("%s/%s/-/merge_requests/%d", r.BaseURL, r.Project, id)
+}
+
+func (r RemoteInfo) BranchURL(branch string) string {
+	if r.BaseURL == "" || r.Project == "" {
+		return ""
+	}
+	if r.ForgeType == "github" {
+		return fmt.Sprintf("%s/%s/commits/%s", r.BaseURL, r.Project, branch)
+	}
+	return fmt.Sprintf("%s/%s/-/commits/%s", r.BaseURL, r.Project, branch)
+}
+
 func firstline(s string) string {
 	if idx := strings.IndexByte(s, '\n'); idx > 0 {
 		return s[:idx]

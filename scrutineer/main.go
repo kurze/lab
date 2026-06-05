@@ -342,7 +342,12 @@ func postMRResult(ctx context.Context, forge Forge, sr *StoredResult, key, style
 		}
 	}
 
-	logf("%s %s %d finding(s)", cl(ansiBold, fmt.Sprintf("#%d", id)), cl(ansiGreen, "✓"), len(result.Findings))
+	remote := DetectRemote(cfg.RepoPath)
+	if link := remote.MRURL(id); link != "" {
+		logf("%s %s %d finding(s) — %s", cl(ansiBold, fmt.Sprintf("#%d", id)), cl(ansiGreen, "✓"), len(result.Findings), link)
+	} else {
+		logf("%s %s %d finding(s)", cl(ansiBold, fmt.Sprintf("#%d", id)), cl(ansiGreen, "✓"), len(result.Findings))
+	}
 }
 
 func postBranchResult(ctx context.Context, forge Forge, sr *StoredResult, key string, cfg Config) {
@@ -459,6 +464,7 @@ func cmdReview(args []string) {
 	comments := fs.String("comments", "", "comment style: summary, inline, or both")
 	branch := fs.String("branch", "", "review a local branch (commits since base branch)")
 	commitSHA := fs.String("commit", "", "review a single commit by SHA")
+	base := fs.String("base", "", "base branch for -branch review (default: auto-detect)")
 	agent := fs.String("agent", "", "review agent: builtin, claude, codex, gemini, vibe, opencode, pi, custom")
 	model := fs.String("model", "", "LLM model (overrides config)")
 	verbose := fs.Bool("verbose", false, "print LLM exchanges to stderr in real time")
@@ -500,7 +506,7 @@ func cmdReview(args []string) {
 		}
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 		defer cancel()
-		if err := runBranch(ctx, cfg, state, *branch); err != nil {
+		if err := runBranch(ctx, cfg, state, *branch, *base); err != nil {
 			log.Fatalf("error: %v", err)
 		}
 		return
@@ -544,8 +550,11 @@ func cmdReview(args []string) {
 	os.Exit(1)
 }
 
-func runBranch(ctx context.Context, cfg Config, state *State, branchName string) error {
-	baseBranch := detectBaseBranch(cfg.RepoPath)
+func runBranch(ctx context.Context, cfg Config, state *State, branchName, baseBranchOverride string) error {
+	baseBranch := baseBranchOverride
+	if baseBranch == "" {
+		baseBranch = detectBaseBranch(cfg.RepoPath)
+	}
 	reviewer := newReviewer(cfg)
 
 	commits, err := branchCommits(cfg.RepoPath, branchName, baseBranch)
@@ -689,7 +698,12 @@ func runBranch(ctx context.Context, cfg Config, state *State, branchName string)
 					}
 				}
 				if posted > 0 {
-					logf("posted %d commit comment(s) on branch %s", posted, branchName)
+					remote := DetectRemote(cfg.RepoPath)
+					if link := remote.BranchURL(branchName); link != "" {
+						logf("posted %d commit comment(s) on branch %s — %s", posted, branchName, link)
+					} else {
+						logf("posted %d commit comment(s) on branch %s", posted, branchName)
+					}
 				}
 			}
 		}
@@ -758,7 +772,12 @@ func runCommit(ctx context.Context, cfg Config, state *State, sha string) error 
 				warnf("commit comment on %s:%d failed: %v", ic.File, ic.Line, err)
 			}
 		}
-		logf("posted %d commit comment(s) on %s", len(inlineComments), shortSHA)
+		remote := DetectRemote(cfg.RepoPath)
+		if link := remote.CommitURL(sha); link != "" {
+			logf("posted %d commit comment(s) on %s — %s", len(inlineComments), shortSHA, link)
+		} else {
+			logf("posted %d commit comment(s) on %s", len(inlineComments), shortSHA)
+		}
 	}
 
 	return nil
@@ -1181,7 +1200,12 @@ func run(ctx context.Context, cfg Config, state *State, targets []MRTarget) erro
 						s.Status = "inline failed"
 					} else {
 						posted = len(inlineComments)
-						logf("%s posted %s inline comment(s)", cl(ansiBold, fmt.Sprintf("#%d", pr.ID)), cl(ansiGreen, fmt.Sprintf("%d", posted)))
+						remote := DetectRemote(cfg.RepoPath)
+						if link := remote.MRURL(pr.ID); link != "" {
+							logf("%s posted %s inline comment(s) — %s", cl(ansiBold, fmt.Sprintf("#%d", pr.ID)), cl(ansiGreen, fmt.Sprintf("%d", posted)), link)
+						} else {
+							logf("%s posted %s inline comment(s)", cl(ansiBold, fmt.Sprintf("#%d", pr.ID)), cl(ansiGreen, fmt.Sprintf("%d", posted)))
+						}
 					}
 				}
 			}
