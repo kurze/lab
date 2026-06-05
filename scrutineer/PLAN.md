@@ -106,11 +106,11 @@ Generate shell completion scripts for bash, zsh, and fish.
 
 Improve the review quality by refining the system prompt sent to the LLM. Details TBD at implementation time.
 
-- [x] Audit current prompt for verbosity, ambiguity, and missed instructions
-- [x] Structure prompt with clear sections (role, task, constraints, output format)
-- [x] Add configurable prompt templates or overlays for different review styles (security-focused, performance-focused, etc.)
+- [ ] Audit current prompt for verbosity, ambiguity, and missed instructions
+- [ ] Structure prompt with clear sections (role, task, constraints, output format)
+- [ ] Add configurable prompt templates or overlays for different review styles (security-focused, performance-focused, etc.)
 - [ ] Benchmark prompt changes against a set of known MRs to measure finding quality
-- [x] Allow user-provided prompt fragments via config (e.g. project-specific review guidelines)
+- [ ] Allow user-provided prompt fragments via config (e.g. project-specific review guidelines)
 
 ## Phase 10: Agent presets and provider support
 
@@ -138,13 +138,13 @@ Support external CLI review agents (Claude Code, Codex, Gemini, etc.) and hosted
 
 Automatically generate fixup commits for findings above a configurable severity threshold.
 
-- [ ] Add `--fix` flag to `review` subcommand: after review, attempt to generate fixes for qualifying findings
-- [ ] Add `fix_threshold` config option (default: `"minor"`) — only generate fixes for findings at or above this severity
-- [ ] For each qualifying finding, send the finding + relevant file context to the LLM and ask for a concrete patch
-- [ ] Apply each patch as its own `fixup!` commit targeting the original commit (`git commit --fixup=<sha>`) — one fixup per finding for clarity, user squashes after review
-- [ ] Add `--fix-dry-run` flag to preview generated patches without committing
-- [ ] Add `fix` subcommand to generate fixes from previously stored review results (without re-running the review)
-- [ ] Handle conflicts gracefully: skip fix if patch doesn't apply cleanly, report to user
+- [x] Add `--fix` flag to `review` subcommand: after review, attempt to generate fixes for qualifying findings
+- [x] Add `fix_threshold` config option (default: `"minor"`) — only generate fixes for findings at or above this severity
+- [x] For each qualifying finding, send the finding + relevant file context to the LLM and ask for a concrete patch
+- [x] Apply each patch as its own `fixup!` commit targeting the original commit (`git commit --fixup=<sha>`) — one fixup per finding for clarity, user squashes after review
+- [x] Add `--fix-dry-run` flag to preview generated patches without committing
+- [x] Add `fix` subcommand to generate fixes from previously stored review results (without re-running the review)
+- [x] Handle conflicts gracefully: skip fix if patch doesn't apply cleanly, report to user
 
 ---
 
