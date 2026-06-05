@@ -615,9 +615,16 @@ func runBranch(ctx context.Context, cfg Config, state *State, branchName, baseBr
 			}
 
 			merged := mergeCommitResults(commitResults)
+			peakCtx := merged.PeakContextTokens
+			if branchResult.PeakContextTokens > peakCtx {
+				peakCtx = branchResult.PeakContextTokens
+			}
 			result = &ReviewResult{
-				Findings: append(merged.Findings, branchResult.Findings...),
-				Model:    merged.Model,
+				Findings:          append(merged.Findings, branchResult.Findings...),
+				Model:             merged.Model,
+				TokensUsed:        merged.TokensUsed + branchResult.TokensUsed,
+				GeneratedTokens:   merged.GeneratedTokens + branchResult.GeneratedTokens,
+				PeakContextTokens: peakCtx,
 			}
 			comment = FormatBothReviewComment(commitResults, branchResult, pr.Title, merged.Model)
 		} else {
@@ -930,13 +937,14 @@ func parseMRIDs(s string) ([]int64, error) {
 }
 
 type mrSummary struct {
-	ID       int64
-	Title    string
-	Findings int
-	Posted   int
-	Tokens   int
-	Duration time.Duration
-	Status   string
+	ID          int64
+	Title       string
+	Findings    int
+	Posted      int
+	Generated   int
+	PeakContext int
+	Duration    time.Duration
+	Status      string
 }
 
 func formatTokens(n int) string {
@@ -955,22 +963,28 @@ func formatTokens(n int) string {
 func printSummaryTable(summaries []mrSummary, totalDuration time.Duration) {
 	fmt.Fprintf(os.Stderr, "\n%s\n", cl(ansiBold, "Summary"))
 	fmt.Fprintf(os.Stderr, "%s\n", cl(ansiDim, strings.Repeat("─", 72)))
-	fmt.Fprintf(os.Stderr, "%s %s %s %s %s %s\n",
+	fmt.Fprintf(os.Stderr, "%s %s %s %s %s %s %s\n",
 		cl(ansiDim, fmt.Sprintf("%-7s", "MR")),
 		cl(ansiDim, fmt.Sprintf("%-9s", "Findings")),
 		cl(ansiDim, fmt.Sprintf("%-8s", "Posted")),
-		cl(ansiDim, fmt.Sprintf("%-9s", "Tokens")),
+		cl(ansiDim, fmt.Sprintf("%-11s", "Generated")),
+		cl(ansiDim, fmt.Sprintf("%-11s", "Peak ctx")),
 		cl(ansiDim, fmt.Sprintf("%-10s", "Duration")),
 		cl(ansiDim, "Status"))
-	fmt.Fprintf(os.Stderr, "%s\n", cl(ansiDim, strings.Repeat("─", 72)))
+	fmt.Fprintf(os.Stderr, "%s\n", cl(ansiDim, strings.Repeat("─", 82)))
 
-	totalTokens := 0
+	totalGenerated := 0
+	totalPeakCtx := 0
 	for _, s := range summaries {
-		totalTokens += s.Tokens
+		totalGenerated += s.Generated
+		if s.PeakContext > totalPeakCtx {
+			totalPeakCtx = s.PeakContext
+		}
 		id := fmt.Sprintf("#%-6d", s.ID)
 		findings := fmt.Sprintf("%-9d", s.Findings)
 		posted := fmt.Sprintf("%-8d", s.Posted)
-		tokens := fmt.Sprintf("%-9s", formatTokens(s.Tokens))
+		generated := fmt.Sprintf("%-11s", formatTokens(s.Generated))
+		peakCtx := fmt.Sprintf("%-11s", formatTokens(s.PeakContext))
 		dur := fmt.Sprintf("%-10s", s.Duration.Round(time.Second))
 
 		var status string
@@ -983,12 +997,12 @@ func printSummaryTable(summaries []mrSummary, totalDuration time.Duration) {
 			status = cl(ansiRed, "✗ "+s.Status)
 		}
 
-		fmt.Fprintf(os.Stderr, "%s %s %s %s %s %s\n", id, findings, posted, tokens, dur, status)
+		fmt.Fprintf(os.Stderr, "%s %s %s %s %s %s %s\n", id, findings, posted, generated, peakCtx, dur, status)
 	}
 
-	fmt.Fprintf(os.Stderr, "%s\n", cl(ansiDim, strings.Repeat("─", 72)))
-	fmt.Fprintf(os.Stderr, "Total: %d MR(s), %s tokens, %s\n",
-		len(summaries), formatTokens(totalTokens), totalDuration.Round(time.Second))
+	fmt.Fprintf(os.Stderr, "%s\n", cl(ansiDim, strings.Repeat("─", 82)))
+	fmt.Fprintf(os.Stderr, "Total: %d MR(s), %s generated, %s peak context, %s\n",
+		len(summaries), formatTokens(totalGenerated), formatTokens(totalPeakCtx), totalDuration.Round(time.Second))
 }
 
 func run(ctx context.Context, cfg Config, state *State, targets []MRTarget) error {
@@ -1108,10 +1122,16 @@ func run(ctx context.Context, cfg Config, state *State, targets []MRTarget) erro
 			}
 
 			merged := mergeCommitResults(commitResults)
+			peakCtx := merged.PeakContextTokens
+			if branchResult.PeakContextTokens > peakCtx {
+				peakCtx = branchResult.PeakContextTokens
+			}
 			result = &ReviewResult{
-				Findings:   append(merged.Findings, branchResult.Findings...),
-				Model:      merged.Model,
-				TokensUsed: merged.TokensUsed + branchResult.TokensUsed,
+				Findings:          append(merged.Findings, branchResult.Findings...),
+				Model:             merged.Model,
+				TokensUsed:        merged.TokensUsed + branchResult.TokensUsed,
+				GeneratedTokens:   merged.GeneratedTokens + branchResult.GeneratedTokens,
+				PeakContextTokens: peakCtx,
 			}
 			comment = FormatBothReviewComment(commitResults, branchResult, pr.Title, merged.Model)
 
@@ -1161,11 +1181,12 @@ func run(ctx context.Context, cfg Config, state *State, targets []MRTarget) erro
 		postSummary := style == "summary" || style == "both" || result.RawOutput != ""
 
 		s := mrSummary{
-			ID:       pr.ID,
-			Title:    pr.Title,
-			Findings: len(result.Findings),
-			Tokens:   result.TokensUsed,
-			Duration: time.Since(mrStart),
+			ID:          pr.ID,
+			Title:       pr.Title,
+			Findings:    len(result.Findings),
+			Generated:   result.GeneratedTokens,
+			PeakContext: result.PeakContextTokens,
+			Duration:    time.Since(mrStart),
 		}
 
 		if cfg.DryRun {
@@ -1242,7 +1263,7 @@ func run(ctx context.Context, cfg Config, state *State, targets []MRTarget) erro
 			cl(ansiBold, fmt.Sprintf("#%d", pr.ID)),
 			cl(ansiGreen, "✓"),
 			cl(ansiBold, fmt.Sprintf("%d", len(result.Findings))),
-			cl(ansiDim, fmt.Sprintf("(%s, %s tokens)", s.Duration.Round(time.Second), formatTokens(result.TokensUsed))))
+			cl(ansiDim, fmt.Sprintf("(%s, %s generated, %s peak ctx)", s.Duration.Round(time.Second), formatTokens(result.GeneratedTokens), formatTokens(result.PeakContextTokens))))
 		summaries = append(summaries, s)
 	}
 

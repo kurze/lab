@@ -44,14 +44,16 @@ type LoopConfig struct {
 }
 
 type LoopResult struct {
-	FinalMessage  ChatMessage
-	Messages      []ChatMessage
-	ContextPulled []string
-	Iteration     int
-	Truncated     bool
-	Tracer        *Tracer
-	ElapsedSec    float64
-	TokensUsed    int
+	FinalMessage     ChatMessage
+	Messages         []ChatMessage
+	ContextPulled    []string
+	Iteration        int
+	Truncated        bool
+	Tracer           *Tracer
+	ElapsedSec       float64
+	TokensUsed       int
+	GeneratedTokens  int
+	PeakContextTokens int
 }
 
 func (cfg *LoopConfig) defaults() {
@@ -133,6 +135,8 @@ func RunLoop(ctx context.Context, llm *LLMClient, cfg LoopConfig) (lr *LoopResul
 	var lastToolSig string
 	stuckCount := 0
 	lastTokens := 0
+	totalGenerated := 0
+	peakContext := 0
 	nudged := false
 
 	for iter := 1; iter <= cfg.MaxIter; iter++ {
@@ -161,7 +165,7 @@ func RunLoop(ctx context.Context, llm *LLMClient, cfg LoopConfig) (lr *LoopResul
 			tracer.Log(TraceEntry{Iteration: iter, Role: "error", Content: err.Error()})
 			if ctx.Err() != nil {
 				elapsed := time.Since(start).Seconds()
-				return &LoopResult{ContextPulled: contextPulled, Iteration: iter, Truncated: true, Tracer: tracer, ElapsedSec: elapsed, TokensUsed: lastTokens}, nil
+				return &LoopResult{ContextPulled: contextPulled, Iteration: iter, Truncated: true, Tracer: tracer, ElapsedSec: elapsed, TokensUsed: lastTokens, GeneratedTokens: totalGenerated, PeakContextTokens: peakContext}, nil
 			}
 			return nil, fmt.Errorf("iteration %d: %w", iter, err)
 		}
@@ -171,6 +175,10 @@ func RunLoop(ctx context.Context, llm *LLMClient, cfg LoopConfig) (lr *LoopResul
 		}
 
 		lastTokens = resp.Usage.TotalTokens
+		totalGenerated += resp.Usage.CompletionTokens
+		if resp.Usage.PromptTokens > peakContext {
+			peakContext = resp.Usage.PromptTokens
+		}
 		msg := resp.Choices[0].Message
 		tracer.Log(TraceEntry{
 			Iteration:        iter,
@@ -193,14 +201,16 @@ func RunLoop(ctx context.Context, llm *LLMClient, cfg LoopConfig) (lr *LoopResul
 			}
 			elapsed := time.Since(start).Seconds()
 			return &LoopResult{
-				FinalMessage:  msg,
-				Messages:      messages,
-				ContextPulled: contextPulled,
-				Iteration:     iter,
-				Truncated:     false,
-				Tracer:        tracer,
-				ElapsedSec:    elapsed,
-				TokensUsed:    lastTokens,
+				FinalMessage:      msg,
+				Messages:          messages,
+				ContextPulled:     contextPulled,
+				Iteration:         iter,
+				Truncated:         false,
+				Tracer:            tracer,
+				ElapsedSec:        elapsed,
+				TokensUsed:        lastTokens,
+				GeneratedTokens:   totalGenerated,
+				PeakContextTokens: peakContext,
 			}, nil
 		}
 
@@ -215,13 +225,13 @@ func RunLoop(ctx context.Context, llm *LLMClient, cfg LoopConfig) (lr *LoopResul
 		if stuckCount >= cfg.StuckThreshold {
 			tracer.Log(TraceEntry{Iteration: iter, Role: "system", Content: "stuck detection triggered"})
 			elapsed := time.Since(start).Seconds()
-			return &LoopResult{ContextPulled: contextPulled, Iteration: iter, Truncated: true, Tracer: tracer, ElapsedSec: elapsed, TokensUsed: lastTokens}, nil
+			return &LoopResult{ContextPulled: contextPulled, Iteration: iter, Truncated: true, Tracer: tracer, ElapsedSec: elapsed, TokensUsed: lastTokens, GeneratedTokens: totalGenerated, PeakContextTokens: peakContext}, nil
 		}
 
 		if cfg.TokenCeiling > 0 && resp.Usage.TotalTokens > cfg.TokenCeiling {
 			tracer.Log(TraceEntry{Iteration: iter, Role: "system", Content: fmt.Sprintf("token ceiling reached: %d", resp.Usage.TotalTokens)})
 			elapsed := time.Since(start).Seconds()
-			return &LoopResult{ContextPulled: contextPulled, Iteration: iter, Truncated: true, Tracer: tracer, ElapsedSec: elapsed, TokensUsed: lastTokens}, nil
+			return &LoopResult{ContextPulled: contextPulled, Iteration: iter, Truncated: true, Tracer: tracer, ElapsedSec: elapsed, TokensUsed: lastTokens, GeneratedTokens: totalGenerated, PeakContextTokens: peakContext}, nil
 		}
 
 		messages = append(messages, ChatMessage{Role: "assistant", Content: msg.Content, ToolCalls: msg.ToolCalls})
@@ -245,7 +255,7 @@ func RunLoop(ctx context.Context, llm *LLMClient, cfg LoopConfig) (lr *LoopResul
 	}
 
 	elapsed := time.Since(start).Seconds()
-	return &LoopResult{ContextPulled: contextPulled, Iteration: cfg.MaxIter, Truncated: true, Tracer: tracer, ElapsedSec: elapsed, TokensUsed: lastTokens}, nil
+	return &LoopResult{ContextPulled: contextPulled, Iteration: cfg.MaxIter, Truncated: true, Tracer: tracer, ElapsedSec: elapsed, TokensUsed: lastTokens, GeneratedTokens: totalGenerated, PeakContextTokens: peakContext}, nil
 }
 
 func EstimateTokens(messages []ChatMessage) int {
