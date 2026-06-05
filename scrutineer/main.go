@@ -622,6 +622,7 @@ func runBranch(ctx context.Context, cfg Config, state *State, branchName, baseBr
 			result = &ReviewResult{
 				Findings:          append(merged.Findings, branchResult.Findings...),
 				Model:             merged.Model,
+				TokensUsed:        merged.TokensUsed + branchResult.TokensUsed,
 				GeneratedTokens:   merged.GeneratedTokens + branchResult.GeneratedTokens,
 				PeakContextTokens: peakCtx,
 			}
