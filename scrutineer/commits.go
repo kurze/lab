@@ -30,7 +30,7 @@ type CommitProgressEvent struct {
 type ProgressFunc func(CommitProgressEvent)
 
 type ReviewByCommitsOpts struct {
-	State       *State
+	State       CommitReviewStore
 	Project     string
 	OnProgress  ProgressFunc
 	Concurrency int
