@@ -822,6 +822,7 @@ func newReviewer(cfg Config) Reviewer {
 			Temperature:  cfg.LLM.Temperature,
 			TraceDir:     cfg.LogDir,
 			Verbose:      cfg.Verbose,
+			ReviewCfg:    cfg.Review,
 		}
 	case "custom":
 		cmd := cfg.Agent.Command
@@ -840,9 +841,10 @@ func newReviewer(cfg Config) Reviewer {
 			label = agent
 		}
 		return &CLIReviewer{
-			Command: preset.Command,
-			Args:    preset.Args,
-			Agent:   label,
+			Command:   preset.Command,
+			Args:      preset.Args,
+			Agent:     label,
+			ReviewCfg: cfg.Review,
 		}
 	}
 }

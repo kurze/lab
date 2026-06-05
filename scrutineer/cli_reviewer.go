@@ -9,23 +9,27 @@ import (
 )
 
 type CLIReviewer struct {
-	Command string
-	Args    []string
-	Agent   string
+	Command   string
+	Args      []string
+	Agent     string
+	ReviewCfg ReviewPromptConfig
 }
 
 func (r *CLIReviewer) Review(ctx context.Context, workDir string, diff string) (*ReviewResult, error) {
-	prompt := buildCLIReviewPrompt(diff, "commit")
+	pc := PromptConfig{Focus: r.ReviewCfg.Focus, Guidelines: r.ReviewCfg.Guidelines}
+	prompt := BuildCLIReviewPrompt(diff, "commit", pc)
 	return r.execute(ctx, workDir, prompt)
 }
 
 func (r *CLIReviewer) ReviewFull(ctx context.Context, workDir string, diff string) (*ReviewResult, error) {
-	prompt := buildCLIReviewPrompt(diff, "full")
+	pc := PromptConfig{Focus: r.ReviewCfg.Focus, Guidelines: r.ReviewCfg.Guidelines}
+	prompt := BuildCLIReviewPrompt(diff, "full", pc)
 	return r.execute(ctx, workDir, prompt)
 }
 
 func (r *CLIReviewer) ReviewWithContext(ctx context.Context, workDir string, diff string, priorContext string) (*ReviewResult, error) {
-	prompt := buildCLIRepassPrompt(diff, priorContext)
+	pc := PromptConfig{Focus: r.ReviewCfg.Focus, Guidelines: r.ReviewCfg.Guidelines}
+	prompt := BuildCLIRepassPrompt(diff, priorContext, pc)
 	return r.execute(ctx, workDir, prompt)
 }
 
@@ -44,18 +48,4 @@ func (r *CLIReviewer) execute(ctx context.Context, workDir string, prompt string
 
 	output := strings.TrimSpace(stdout.String())
 	return &ReviewResult{RawOutput: output, Model: r.Agent}, nil
-}
-
-var fence = "```"
-
-func buildCLIReviewPrompt(diff string, mode string) string {
-	scope := "commit"
-	if mode == "full" {
-		scope = "merge request"
-	}
-	return fmt.Sprintf("Review the following %s diff. For each issue found, state the file and line, severity (info/minor/major/critical), and a brief description.\n\nIf no issues are found, say so.\n\n%sdiff\n%s\n%s", scope, fence, diff, fence)
-}
-
-func buildCLIRepassPrompt(diff string, priorContext string) string {
-	return fmt.Sprintf("Review the following merge request diff. Focus on cross-cutting concerns that span multiple commits.\n\nPrior findings (already reported — do NOT repeat these):\n%s\n\n---\n\n%sdiff\n%s\n%s\n\nReport only NEW findings not covered above. For each issue, state the file and line, severity (info/minor/major/critical), and a brief description. If no new issues are found, say so.", priorContext, fence, diff, fence)
 }

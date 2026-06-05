@@ -23,6 +23,7 @@ type LLMReviewer struct {
 	TraceMeta    map[string]string
 	TraceDir     string
 	Verbose      bool
+	ReviewCfg    ReviewPromptConfig
 	mu           sync.Mutex
 }
 
@@ -35,18 +36,24 @@ func (r *LLMReviewer) ReviewFull(ctx context.Context, workDir string, diff strin
 }
 
 func (r *LLMReviewer) review(ctx context.Context, workDir string, diff string, full bool) (*ReviewResult, error) {
+	pc := PromptConfig{
+		Root:       workDir,
+		Focus:      r.ReviewCfg.Focus,
+		Guidelines: r.ReviewCfg.Guidelines,
+	}
+
 	var systemPrompt string
 	maxIter := 6
 	maxForkDepth := 0
 	tracerTag := "commit-review"
 
 	if full {
-		systemPrompt = buildMRReviewPrompt(workDir)
+		systemPrompt = BuildMRReviewPrompt(pc)
 		maxIter = 12
 		maxForkDepth = 1
 		tracerTag = "mr-review"
 	} else {
-		systemPrompt = buildCommitReviewPrompt(workDir)
+		systemPrompt = BuildCommitReviewPrompt(pc)
 		maxForkDepth = 1
 	}
 
@@ -105,7 +112,13 @@ func (r *LLMReviewer) review(ctx context.Context, workDir string, diff string, f
 }
 
 func (r *LLMReviewer) ReviewWithContext(ctx context.Context, workDir string, diff string, priorContext string) (*ReviewResult, error) {
-	systemPrompt := buildMRRepassPrompt(workDir, priorContext)
+	pc := PromptConfig{
+		Root:         workDir,
+		PriorContext: priorContext,
+		Focus:        r.ReviewCfg.Focus,
+		Guidelines:   r.ReviewCfg.Guidelines,
+	}
+	systemPrompt := BuildMRRepassPrompt(pc)
 
 	temp := r.Temperature
 	if temp == 0 {
@@ -170,9 +183,7 @@ func (r *LLMReviewer) extractFindings(ctx context.Context, reviewText string, tr
 	resp, err := r.LLM.Chat(ctx, agentcore.ChatRequest{
 		Model: r.Model,
 		Messages: []agentcore.ChatMessage{
-			{Role: "system", Content: `Extract structured findings from the code review below. Output ONLY a JSON object:
-{"findings": [{"category": "string", "severity": "info|minor|major|critical", "location": "file:line", "description": "one sentence", "evidence": "short quote or empty"}]}
-If the review found no issues, return {"findings": []}.`},
+			{Role: "system", Content: BuildExtractionPrompt()},
 			{Role: "user", Content: reviewText},
 		},
 		Temperature: 0.1,
@@ -205,71 +216,6 @@ If the review found no issues, return {"findings": []}.`},
 	return &result, nil
 }
 
-func buildMRRepassPrompt(root string, priorContext string) string {
-	return fmt.Sprintf(`You are a code review agent. Second pass — DO NOT repeat prior findings. Be brief.
-
-Prior findings (already reported):
-<prior_findings>
-%s
-</prior_findings>
-
-Workspace root: %s
-
-Tools (paths relative to root):
-- read_file, grep, glob, list_dir, git_log, git_diff, git_blame, git_show
-- fork: split into parallel sub-tasks (use this!)
-
-Process:
-1. EXPLORE: read the full diff. Use grep/read_file to trace how changes across commits interact — shared state, call chains, data flow.
-2. Call the fork tool with these four tasks (same categories, but focus on cross-commit interactions):
-   - id:"bugs", prompt:"Hunt for logic errors that emerge from cross-commit interactions: shared state broken by different commits, inconsistent error handling, assumptions in one commit violated by another."
-   - id:"security", prompt:"Hunt for security issues spanning multiple commits: auth gaps, input validation missing on new paths, secrets exposure, unsafe data flow across changed boundaries."
-   - id:"perf", prompt:"Hunt for performance issues at branch scale: redundant work across commits, new hot paths without caching, unbounded growth introduced by combined changes."
-   - id:"style", prompt:"Hunt for branch-wide consistency: repeated anti-patterns, inconsistent naming or conventions, missing tests for new code paths, dead code left behind."
-
-Output: plain text. For each finding: file:line, severity (info/minor/major/critical), what you found, short evidence quote. If no new issues, say "No cross-cutting issues found."
-
-Rules: NEVER repeat prior findings. Focus on what spans multiple commits or emerges from the full picture. Descriptive, not prescriptive. 1-2 sentences per finding.`, priorContext, root)
-}
-
-func buildCommitReviewPrompt(root string) string {
-	return fmt.Sprintf(`You are a code review agent. Review the commit diff. Be brief — short tool calls, minimal exploration.
-
-Workspace root: %s
-
-Tools (paths relative to root):
-- read_file: read file contents (with optional line range)
-- grep: regex search
-- list_dir: list directory
-
-Process: read the diff, optionally read 1-2 changed files for context, then write your review.
-
-Write your review as plain text. For each finding state: the file and line, severity (info/minor/major/critical), what you found. If the commit is trivial or has no issues, just say "No issues found."
-
-Rules: focus on changes only, not pre-existing issues. Be descriptive, not prescriptive. Keep each finding to 1-2 sentences.`, root)
-}
-
-func buildMRReviewPrompt(root string) string {
-	return fmt.Sprintf(`You are a code review agent. Review the merge request diff. Be brief — concise findings.
-
-Workspace root: %s
-
-Tools (paths relative to root):
-- read_file, grep, glob, list_dir, git_log, git_diff, git_blame, git_show
-- fork: split into parallel sub-tasks (use this!)
-
-Process:
-1. EXPLORE: read the diff carefully. Use grep/read_file to understand the surrounding code — call sites, types, invariants. Build context before judging.
-2. Call the fork tool with these four tasks:
-   - id:"bugs", prompt:"Hunt for logic errors, nil derefs, off-by-one, race conditions, missing error handling, broken invariants. Read changed files and their callers for evidence."
-   - id:"security", prompt:"Hunt for injection, auth bypass, secrets exposure, unsafe input handling, path traversal. Trace data flow from inputs to sensitive operations."
-   - id:"perf", prompt:"Hunt for unnecessary allocations, O(n²) loops, missing caching, unbounded growth, blocking calls. Check hot paths."
-   - id:"style", prompt:"Hunt for dead code, naming issues, unclear control flow, missing or misleading abstractions."
-
-Output: plain text. For each finding: file:line, severity (info/minor/major/critical), what you found, short evidence quote.
-
-Rules: focus on changes only, not pre-existing issues. Descriptive, not prescriptive. 1-2 sentences per finding. If a category has no findings, skip it.`, root)
-}
 
 func cloneMap(m map[string]string) map[string]string {
 	out := make(map[string]string, len(m))

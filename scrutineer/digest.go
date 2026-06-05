@@ -51,14 +51,7 @@ func digestFindings(ctx context.Context, llm *agentcore.LLMClient, model string,
 	resp, err := llm.Chat(ctx, agentcore.ChatRequest{
 		Model: model,
 		Messages: []agentcore.ChatMessage{
-			{Role: "system", Content: `You are a code review assistant. You will receive findings from a per-commit review of a merge request. Produce a compact digest of these findings that another reviewer can use to avoid repeating them.
-
-Produce a concise bulleted summary organized by theme (not by commit). For each bullet:
-- State what was found and where (file/location)
-- Note the severity
-- If multiple commits touch the same concern, mention that
-
-Keep the digest under 500 words. Do not add new findings. Do not suggest fixes. Just summarize what was found.`},
+			{Role: "system", Content: BuildDigestPrompt()},
 			{Role: "user", Content: fmt.Sprintf("Here are the per-commit review findings:\n\n```json\n%s\n```\n\nProduce a thematic digest.", string(inputJSON))},
 		},
 		Temperature: 0.2,
